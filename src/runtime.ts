@@ -21,6 +21,8 @@ export interface Runtime {
   openDb(): Db;
   /** Directory for things the bridge downloads, such as the commit script. */
   cacheDir(): string;
+  /** Serve HTTP on 127.0.0.1 until the process is stopped. */
+  serve(port: number, handler: (request: Request) => Response | Promise<Response>): Promise<void>;
   readTextFile(path: string): Promise<string | null>;
   writeTextFile(path: string, content: string): Promise<void>;
 }

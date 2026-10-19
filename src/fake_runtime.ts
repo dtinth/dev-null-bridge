@@ -9,6 +9,7 @@ export interface FakeRuntime extends Runtime {
   files: Map<string, string>;
   clock: { time: number };
   fetched: string[];
+  served: { port: number; handler: (request: Request) => Response | Promise<Response> }[];
 }
 
 export interface FakeOptions {
@@ -35,6 +36,7 @@ export function fakeRuntime(options: FakeOptions = {}): FakeRuntime {
     files,
     clock,
     fetched,
+    served: [],
     commands: [],
     now: () => new Date(clock.time),
     fetch: (input) => {
@@ -59,6 +61,10 @@ export function fakeRuntime(options: FakeOptions = {}): FakeRuntime {
       return Promise.resolve();
     },
     openDb: () => db,
+    serve(port, handler) {
+      this.served.push({ port, handler });
+      return Promise.resolve();
+    },
     cacheDir: () => "/cache",
     readTextFile: (path) => Promise.resolve(files.get(path) ?? null),
     writeTextFile: (path, content) => {

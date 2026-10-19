@@ -55,6 +55,8 @@ const runtime: Runtime = {
     Deno.mkdirSync(dirname(path), { recursive: true });
     return openDbAt(path);
   },
+  serve: (port, handler) =>
+    Deno.serve({ hostname: "127.0.0.1", port, onListen: () => {} }, handler).finished,
   cacheDir: () => `${env["XDG_CACHE_HOME"] ?? `${home}/.cache`}/dev-null-bridge`,
   async readTextFile(path) {
     try {

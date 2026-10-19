@@ -10,7 +10,7 @@ import type { Message } from "./types.ts";
 export const CLI_NAME = "devnull-bridge";
 
 /** How long without a heartbeat before the poller counts as down. */
-const STALE_POLLER_MS = 120_000;
+export const STALE_POLLER_MS = 120_000;
 
 export interface LongPollCommand {
   name: string;

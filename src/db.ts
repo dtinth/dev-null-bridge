@@ -39,6 +39,13 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   PRIMARY KEY (subscriber, commit_id)
 );
 CREATE INDEX IF NOT EXISTS subscriptions_commit ON subscriptions (commit_id);
+CREATE TABLE IF NOT EXISTS roots (
+  id TEXT PRIMARY KEY,
+  author TEXT NOT NULL,
+  body TEXT NOT NULL,
+  html_url TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -223,4 +230,11 @@ export function getMeta(db: Db, key: string): string | null {
 
 export function countMessages(db: Db): number {
   return Number(db.prepare("SELECT COUNT(*) AS n FROM messages").get()?.["n"] ?? 0);
+}
+
+/** Remembers the commit a watch started from, so the dashboard can say what the thread is about. */
+export function saveRoot(db: Db, root: Message): void {
+  db.prepare(
+    "INSERT OR REPLACE INTO roots (id, author, body, html_url, created_at) VALUES (?, ?, ?, ?, ?)",
+  ).run(root.id, root.author, root.body, root.htmlUrl, root.createdAt);
 }

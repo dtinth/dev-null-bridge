@@ -2,6 +2,7 @@
  * Command dispatch. Every external effect goes through {@link Runtime}.
  */
 import { createApi } from "./api.ts";
+import { dashboardHandler } from "./dashboard.ts";
 import {
   addTree,
   countMessages,
@@ -10,6 +11,7 @@ import {
   readMessages,
   recordPost,
   removeTree,
+  saveRoot,
 } from "./db.ts";
 import {
   CLI_NAME,
@@ -39,6 +41,7 @@ Usage:
   ${CLI_NAME} list [name]                    The threads each subscriber follows
   ${CLI_NAME} status                         Whether the poller is running, and what it holds
   ${CLI_NAME} poller                         Run the poller (a daemon: see the README)
+  ${CLI_NAME} dashboard [--port 8787]        A web page on 127.0.0.1 listing every subscription
 
 A <commit> is its URL, its id, or the 7-character hash the site shows.
 Only replies by ${"$"}BRIDGE_AUTHORS (default: dtinth) are ever stored or printed.
@@ -140,6 +143,8 @@ export async function runCli(argv: string[], rt: Runtime): Promise<number> {
         return status(rt);
       case "poller":
         return await poller(rt);
+      case "dashboard":
+        return await dashboard(rt, args);
       default:
         throw new UsageError(`Unknown command ${command}. Try ${CLI_NAME} help.`);
     }
@@ -169,6 +174,7 @@ async function watch(rt: Runtime, args: string[]): Promise<number> {
     throw new Error(`There is no public commit ${id}. Is it still pending review?`);
   }
 
+  saveRoot(db, root);
   addTree(db, name, id);
   const replies = readMessages(db, name).filter((message) => message.id !== id);
   const printed = [root, ...replies];
@@ -314,5 +320,17 @@ async function poller(rt: Runtime): Promise<number> {
     authors: allowedAuthors(rt.env),
     intervalMs: interval * 1000,
   });
+  return 0;
+}
+
+async function dashboard(rt: Runtime, args: string[]): Promise<number> {
+  const parsed = parseArgs(args, ["port"]);
+  const port = Number(flag(parsed, "port") ?? rt.env["BRIDGE_DASHBOARD_PORT"] ?? "8787");
+  if (parsed.positionals.length > 0 || !Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new UsageError(`usage: ${CLI_NAME} dashboard [--port 8787]`);
+  }
+
+  rt.stderr(`dashboard on http://127.0.0.1:${port}\n`);
+  await rt.serve(port, dashboardHandler(rt.openDb(), () => rt.now()));
   return 0;
 }
