@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Runs the bridge from a checkout: symlink this file somewhere on your PATH.
+set -euo pipefail
+dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+exec deno run --quiet --allow-read --allow-write --allow-net --allow-env --allow-run=bash --allow-sys \
+  "$dir/src/main.ts" "$@"
