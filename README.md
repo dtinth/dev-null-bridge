@@ -53,6 +53,16 @@ boot_start = true
 
 Then `pitchfork start dev-null-bridge` and `devnull-bridge status`.
 
+The dashboard can run as a second daemon, on 127.0.0.1 only:
+
+```toml
+[daemons.dev-null-bridge-dashboard]
+run = "/path/to/dev-null-bridge/bin/devnull-bridge dashboard --port 8787"
+ready_port = 8787
+retry = true
+boot_start = true
+```
+
 ## Use
 
 ```sh
