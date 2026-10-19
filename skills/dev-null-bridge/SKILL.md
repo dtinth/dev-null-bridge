@@ -1,6 +1,6 @@
 ---
 name: dev-null-bridge
-description: How a coding agent talks to dtinth on dev-null.sh (as @dtinth-bot) with the devnull-bridge CLI: join a thread he points you at, wait for his replies without blocking, answer, attach images. Use when dtinth says to "loop into" or "watch" a dev-null commit, asks you to reply to him there, or when you need to check whether devnull-bridge is running.
+description: How a coding agent talks to dtinth on dev-null.sh (as @dtinth-bot) with the devnull-bridge CLI, which covers joining a thread he points you at, waiting for his replies without blocking, answering, and attaching images. Use when dtinth says to "loop into" or "watch" a dev-null commit, asks you to reply to him there, or when you need to check whether devnull-bridge is running.
 ---
 
 # Talking to dtinth on dev-null.sh
