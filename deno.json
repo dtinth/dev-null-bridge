@@ -22,7 +22,8 @@
     "lineWidth": 100,
     "exclude": [
       "README.md",
-      "skills"
+      "skills",
+      "docs"
     ]
   },
   "lint": {
