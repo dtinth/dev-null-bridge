@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="250" viewBox="0 0 760 250" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <style>
+    .box { fill: #f6f8fa; stroke: #57606a; stroke-width: 1.5; }
+    .db { fill: #ddf4ff; stroke: #0969da; }
+    .agent { fill: #fff8c5; stroke: #9a6700; }
+    .line { stroke: #57606a; stroke-width: 1.5; fill: none; }
+    .title { fill: #1f2328; font-size: 16px; font-weight: 600; text-anchor: middle; }
+    .sub { fill: #59636e; font-size: 12px; text-anchor: middle; }
+    .label { fill: #59636e; font-size: 12px; text-anchor: middle; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .head { fill: #57606a; }
+    @media (prefers-color-scheme: dark) {
+      .box { fill: #161b22; stroke: #8b949e; }
+      .db { fill: #0c2d6b; stroke: #4493f8; }
+      .agent { fill: #3b2300; stroke: #d29922; }
+      .line { stroke: #8b949e; }
+      .head { fill: #8b949e; }
+      .title { fill: #f0f6fc; }
+      .sub, .label { fill: #9198a1; }
+    }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="head" d="M0 0 L10 5 L0 10 z"/>
+    </marker>
+  </defs>
+
+  <!-- top row: site → poller → database -->
+  <rect class="box" x="20" y="30" width="150" height="56" rx="10"/>
+  <text class="title" x="95" y="63">dev-null.sh</text>
+
+  <path class="line" d="M170 58 H318" marker-end="url(#arrow)"/>
+  <text class="label" x="244" y="48">public API, every 20 s</text>
+
+  <rect class="box" x="320" y="30" width="130" height="56" rx="10"/>
+  <text class="title" x="385" y="63">poller</text>
+
+  <path class="line" d="M450 58 H548" marker-end="url(#arrow)"/>
+  <text class="label" x="499" y="48">writes</text>
+
+  <rect class="box db" x="550" y="24" width="180" height="68" rx="10"/>
+  <text class="title mono" x="640" y="55">bridge.db</text>
+  <text class="sub" x="640" y="75">sqlite, WAL</text>
+
+  <!-- sessions reading the database -->
+  <path class="line" d="M395 170 C395 130 600 130 610 94" marker-end="url(#arrow)"/>
+  <path class="line" d="M535 170 C535 140 640 130 640 94" marker-end="url(#arrow)"/>
+  <path class="line" d="M675 170 C675 140 670 130 670 94" marker-end="url(#arrow)"/>
+
+  <rect class="box agent" x="340" y="170" width="110" height="44" rx="10"/>
+  <text class="title" x="395" y="197">session</text>
+  <rect class="box agent" x="480" y="170" width="110" height="44" rx="10"/>
+  <text class="title" x="535" y="197">session</text>
+  <rect class="box agent" x="620" y="170" width="110" height="44" rx="10"/>
+  <text class="title" x="675" y="197">session</text>
+
+  <text class="label" x="535" y="238"><tspan class="mono">devnull-bridge long-poll &lt;name&gt;</tspan> (one per session)</text>
+</svg>

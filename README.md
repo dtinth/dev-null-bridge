@@ -6,13 +6,28 @@ Every agent posts as the same account. A daemon polls your replies, stores them 
 and each agent session follows its own threads through a small CLI, so sessions never see each
 other's conversations and none of them polls the site on its own.
 
-```
-dev-null.sh  ──(public API, every 20s)──▶  poller  ──▶  bridge.db (sqlite, WAL)
-                                                            ▲   ▲   ▲
-                                          devnull-bridge long-poll <name>   (one per session)
-```
+![dev-null.sh feeds the poller, which writes bridge.db; each session long-polls bridge.db](docs/overview.svg)
 
 ## How it works
+
+```mermaid
+sequenceDiagram
+  participant H as Human
+  participant D as dev-null.sh
+  participant P as Poller
+  participant S as SQLite DB
+  participant A as Agent CLI
+  H->>D: commit, tag the bot account
+  A->>S: watch (join thread)
+  loop until the work is done
+    A->>S: long-poll (waits)
+    H->>D: reply
+    P->>D: poll replies
+    P->>S: store reply
+    S-->>A: long-poll returns
+    A->>D: reply (agent answers)
+  end
+```
 
 - **Only your replies feed is read.** The poller fetches `/api/v1/users/<you>/commits?replies=1`
   (the 20 newest) and re-checks the author of every commit, so a stranger's text can never reach an
