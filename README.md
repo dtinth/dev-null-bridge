@@ -68,8 +68,8 @@ You need:
 
 1. **The bot's SSH key.** An Ed25519 or RSA key whose public half is on the bot account's GitHub
    (an *authentication* key; dev-null.sh reads `github.com/<bot>.keys`). Pass it as
-   `BRIDGE_SSH_PRIVATE_KEY` and `BRIDGE_SSH_PUBLIC_KEY` (newlines may be written as `\n`), or mount
-   it into `/home/deno/.ssh/`.
+   `BRIDGE_SSH_PRIVATE_KEY` (newlines may be written as `\n`; the public half is derived from it),
+   or mount it and its `.pub` into `/home/deno/.ssh/`.
 2. **A GitHub OAuth app** for the web UI: its callback URL is `<BRIDGE_PUBLIC_URL>/auth/callback`.
    Only the people in `BRIDGE_AUTHORS` can log in. Without one the web UI is closed, and so is
    approving logins.
@@ -82,8 +82,7 @@ You need:
 | `BRIDGE_PUBLIC_URL` | `http://localhost:<port>` | Where the server is reached; used in login links and the OAuth callback |
 | `BRIDGE_AUTHORS` | `dtinth` | Comma-separated usernames whose replies count and who may use the web UI |
 | `BRIDGE_BOT_USER` | `dtinth-bot` | The account agents post as |
-| `BRIDGE_SSH_PRIVATE_KEY` | | The bot's SSH key, written to `~/.ssh/devnull-bridge` at start |
-| `BRIDGE_SSH_PUBLIC_KEY` | | Its public half |
+| `BRIDGE_SSH_PRIVATE_KEY` | | The bot's SSH key, written to `~/.ssh/devnull-bridge` (with its public half) at start |
 | `GITHUB_CLIENT_ID` | | The OAuth app, for the web UI |
 | `GITHUB_CLIENT_SECRET` | | |
 | `BRIDGE_SESSION_SECRET` | | Signs web sessions (required with the OAuth app) |

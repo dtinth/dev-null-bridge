@@ -26,14 +26,17 @@ Deno.test("serve runs the poller and the server on PORT, on every address by def
   assertEquals(await health.text(), "ok");
 });
 
-Deno.test("serve writes an SSH key from the environment where the commit script looks", async () => {
+Deno.test("serve writes an SSH key from the environment, and its public half, where the commit script looks", async () => {
   const rt = fakeRuntime({
     env: {
       HOME: "/home/deno",
       BRIDGE_SSH_PRIVATE_KEY:
         "-----BEGIN OPENSSH PRIVATE KEY-----\\nabc\\n-----END OPENSSH PRIVATE KEY-----",
-      BRIDGE_SSH_PUBLIC_KEY: "ssh-ed25519 AAAA bot",
     },
+    command: (cmd) =>
+      cmd === "ssh-keygen"
+        ? { code: 0, stdout: "ssh-ed25519 AAAA bot\n", stderr: "" }
+        : { code: 1, stdout: "", stderr: "" },
   });
   rt.sleep = () => Promise.reject(new Error("stop"));
 
@@ -43,11 +46,17 @@ Deno.test("serve writes an SSH key from the environment where the commit script 
     rt.files.get("/home/deno/.ssh/devnull-bridge"),
     "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----\n",
   );
+  assertEquals(rt.commands[0]?.cmd, "ssh-keygen");
+  assertEquals(rt.commands[0]?.args, ["-y", "-f", "/home/deno/.ssh/devnull-bridge"]);
   assertEquals(rt.files.get("/home/deno/.ssh/devnull-bridge.pub"), "ssh-ed25519 AAAA bot\n");
 
-  const half = fakeRuntime({ env: { BRIDGE_SSH_PUBLIC_KEY: "ssh-ed25519 AAAA bot" } });
-  assertEquals(await runCli(["serve"], half), 2);
-  assertEquals(half.served, []);
+  const bad = fakeRuntime({
+    env: { BRIDGE_SSH_PRIVATE_KEY: "not a key" },
+    command: () => ({ code: 255, stdout: "", stderr: "invalid format" }),
+  });
+  assertEquals(await runCli(["serve"], bad), 2);
+  assertStringIncludes(bad.err.join(""), "invalid format");
+  assertEquals(bad.served, []);
 });
 
 Deno.test("the server's config needs both halves of the OAuth app and a long session secret", () => {

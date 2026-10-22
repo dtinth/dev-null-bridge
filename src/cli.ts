@@ -24,8 +24,8 @@ Config (environment):
   BRIDGE_BOT_USER        the account agents post as (default: dtinth-bot)
   BRIDGE_INTERVAL        seconds between polls (default: 20)
   BRIDGE_COMMIT_SCRIPT   use this commit script instead of downloading one
-  BRIDGE_SSH_PRIVATE_KEY the bot's SSH key, written to ~/.ssh at start (or put it there yourself)
-  BRIDGE_SSH_PUBLIC_KEY  its public half, on the bot's GitHub account
+  BRIDGE_SSH_PRIVATE_KEY the bot's SSH key, written to ~/.ssh at start with its public half
+                         (or put both there yourself)
   BRIDGE_PUBLIC_URL      where the server is reached (default: http://localhost:<port>)
   BRIDGE_SESSION_SECRET  signs web sessions (32+ characters; required with GitHub login)
   GITHUB_CLIENT_ID       a GitHub OAuth app, for the web UI's login
@@ -111,19 +111,21 @@ async function serve(rt: Runtime): Promise<number> {
 
 /**
  * The commit script signs with a key from ~/.ssh. On a host where files are awkward to mount, the
- * key can come in the environment instead; it is written there (only the owner can read it).
+ * key can come in the environment instead; it is written there (only the owner can read it), and
+ * its public half, which the script also reads, is derived from it.
  */
 async function installSshKey(rt: Runtime): Promise<void> {
   const privateKey = rt.env["BRIDGE_SSH_PRIVATE_KEY"] ?? "";
-  const publicKey = rt.env["BRIDGE_SSH_PUBLIC_KEY"] ?? "";
-  if (privateKey === "" && publicKey === "") return;
-  if (privateKey === "" || publicKey === "") {
-    throw new UsageError("Set both BRIDGE_SSH_PRIVATE_KEY and BRIDGE_SSH_PUBLIC_KEY, or neither.");
-  }
-  const unescape = (key: string) => `${key.replaceAll("\\n", "\n").trim()}\n`;
+  if (privateKey === "") return;
   const path = `${rt.env["HOME"] ?? ""}/.ssh/devnull-bridge`;
-  await rt.writeTextFile(path, unescape(privateKey));
-  await rt.writeTextFile(`${path}.pub`, unescape(publicKey));
+  await rt.writeTextFile(path, `${privateKey.replaceAll("\\n", "\n").trim()}\n`);
+  const derived = await rt.runCommand("ssh-keygen", ["-y", "-f", path]);
+  if (derived.code !== 0) {
+    throw new UsageError(
+      `BRIDGE_SSH_PRIVATE_KEY is not a usable SSH key (ssh-keygen: ${derived.stderr.trim()}).`,
+    );
+  }
+  await rt.writeTextFile(`${path}.pub`, `${derived.stdout.trim()}\n`);
   rt.stderr(`installed the SSH key from the environment at ${path}\n`);
 }
 

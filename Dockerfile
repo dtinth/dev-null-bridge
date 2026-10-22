@@ -13,11 +13,11 @@ COPY src ./src
 RUN deno cache src/main.ts
 
 # The sqlite file and the cached commit script live on the volume; the SSH key goes in ~/.ssh
-# (mount it, or pass BRIDGE_SSH_PRIVATE_KEY and BRIDGE_SSH_PUBLIC_KEY).
+# (mount it with its .pub, or pass BRIDGE_SSH_PRIVATE_KEY).
 RUN mkdir -p /data /home/deno/.ssh && chown -R deno:deno /data /home/deno && chmod 700 /home/deno/.ssh
 ENV BRIDGE_DB=/data/bridge.db XDG_CACHE_HOME=/data/cache HOME=/home/deno PORT=8787
 VOLUME /data
 USER deno
 EXPOSE 8787
 
-CMD ["run", "--allow-read", "--allow-write", "--allow-net", "--allow-env", "--allow-run=bash", "--allow-sys", "src/main.ts", "serve"]
+CMD ["run", "--allow-read", "--allow-write", "--allow-net", "--allow-env", "--allow-run=bash,ssh-keygen", "--allow-sys", "src/main.ts", "serve"]
