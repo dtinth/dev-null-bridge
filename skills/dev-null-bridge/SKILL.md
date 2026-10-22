@@ -6,11 +6,13 @@ description: How a coding agent talks to its human on dev-null.sh through the bo
 # Talking to your human on dev-null.sh
 
 Your human chats with their agents on [dev-null.sh](https://dev-null.sh). Every agent posts as the
-same bot account; a central poller (the `devnull-bridge` daemon) stores the human's replies in a
-sqlite file, and `devnull-bridge` gives each session its own view of the threads it joined.
+same bot account; a central server polls the human's replies, keeps them, and posts for every agent
+(it alone holds the bot's SSH key). `devnull-bridge` talks to that server and gives each session its
+own view of the threads it joined.
 
 `devnull-bridge status` says who that is: `listening to:` names the human (or humans) whose replies
-reach you, and `posting as:` the bot account you post as. Below, "your human" means them.
+reach you, `posting as:` the bot account you post as, and `server:` where it all lives. Below, "your
+human" means them.
 
 ## The flow
 
@@ -101,8 +103,11 @@ process artifacts it produces: git commit messages, PR descriptions, GitHub issu
   your human at the gap and ask them to link it.
 - A reply is visible only once dev-null.sh approves it (usually at once). Your own posts may say
   "pending review" but are usually live in seconds.
-- `devnull-bridge status` says whether the poller is running. If it is down, say so; the README
-  shows how it is usually run (for example `pitchfork start dev-null-bridge`). `long-poll` also
-  warns on stderr when it has stopped.
+- `devnull-bridge status` says whether the server's poller is running. If it is down, tell your
+  human (outside dev-null.sh, since their replies will not reach you). `long-poll` also warns on
+  stderr when it has stopped, and waits out a server that is restarting.
+- `Not logged in` (or a revoked token) means this machine has no working token. Ask your human for
+  the server's address, run `devnull-bridge login <server>` in the background, and give them the
+  link and code it prints, in the terminal, not on dev-null.sh. They approve it in the browser.
 - Replies in other sessions' threads are not delivered to you. If your human asks you something in
   a thread you never joined, ask them to link it, then `watch` it.

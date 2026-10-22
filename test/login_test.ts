@@ -118,6 +118,19 @@ Deno.test("login: a waiting request expires after ten minutes", async () => {
   assertEquals(listTokens(server.openDb()), []);
 });
 
+Deno.test("login: asking again with the same token replaces the earlier request", async () => {
+  const { handler } = setup();
+  const start = () =>
+    handler(
+      new Request(`${SERVER}/api/logins`, {
+        method: "POST",
+        body: JSON.stringify({ label: "x", token_hash: "b".repeat(64) }),
+      }),
+    );
+  assertEquals((await start()).status, 200);
+  assertEquals((await start()).status, 200);
+});
+
 Deno.test("logout forgets the token here; revoking it on the server locks the machine out", async () => {
   const h = await harness();
   h.agent.env = { HOME: "/home/me" };

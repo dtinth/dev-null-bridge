@@ -169,6 +169,8 @@ const STYLE =
   nav form { display: inline; }
   button { font: inherit; padding: 4px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; }
   button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .token-meta { color: var(--muted); font-size: 13px; font-weight: 400; }
+  .tokens li:first-child { border-top: 0; padding-top: 0; }
   .code { font: 600 24px ui-monospace, monospace; letter-spacing: .08em; margin: 8px 0 12px; }
 `;
 

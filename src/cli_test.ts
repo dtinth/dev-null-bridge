@@ -26,6 +26,30 @@ Deno.test("serve runs the poller and the server on PORT, on every address by def
   assertEquals(await health.text(), "ok");
 });
 
+Deno.test("serve writes an SSH key from the environment where the commit script looks", async () => {
+  const rt = fakeRuntime({
+    env: {
+      HOME: "/home/deno",
+      BRIDGE_SSH_PRIVATE_KEY:
+        "-----BEGIN OPENSSH PRIVATE KEY-----\\nabc\\n-----END OPENSSH PRIVATE KEY-----",
+      BRIDGE_SSH_PUBLIC_KEY: "ssh-ed25519 AAAA bot",
+    },
+  });
+  rt.sleep = () => Promise.reject(new Error("stop"));
+
+  await runCli(["serve"], rt);
+
+  assertEquals(
+    rt.files.get("/home/deno/.ssh/devnull-bridge"),
+    "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----\n",
+  );
+  assertEquals(rt.files.get("/home/deno/.ssh/devnull-bridge.pub"), "ssh-ed25519 AAAA bot\n");
+
+  const half = fakeRuntime({ env: { BRIDGE_SSH_PUBLIC_KEY: "ssh-ed25519 AAAA bot" } });
+  assertEquals(await runCli(["serve"], half), 2);
+  assertEquals(half.served, []);
+});
+
 Deno.test("the server's config needs both halves of the OAuth app and a long session secret", () => {
   assertEquals(serverConfig({}, 8787).publicUrl, "http://localhost:8787");
   assertEquals(serverConfig({}, 8787).oauth, null);

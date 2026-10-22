@@ -382,7 +382,10 @@ export function startLogin(
   db.prepare("DELETE FROM logins WHERE created_at < ?").run(
     new Date(login.now.getTime() - LOGIN_TTL_MS).toISOString(),
   );
-  db.prepare("INSERT INTO logins (code, token_hash, label, created_at) VALUES (?, ?, ?, ?)")
+  // Asking again with the same token replaces the earlier request.
+  db.prepare(
+    "INSERT OR REPLACE INTO logins (code, token_hash, label, created_at) VALUES (?, ?, ?, ?)",
+  )
     .run(login.code, login.tokenHash, login.label, login.now.toISOString());
 }
 

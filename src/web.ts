@@ -7,7 +7,7 @@ export function renderTokens(tokens: TokenInfo[], login: string): string {
       <li>
         <span class="excerpt"><strong>${
     escapeHtml(token.label)
-  }</strong><br><span class="count">approved by @${escapeHtml(token.approvedBy)} ${
+  }</strong><br><span class="token-meta">approved by @${escapeHtml(token.approvedBy)} ${
     escapeHtml(token.createdAt)
   } · ${
     token.lastUsedAt === null ? "never used" : `last used ${escapeHtml(token.lastUsedAt)}`
@@ -24,7 +24,7 @@ export function renderTokens(tokens: TokenInfo[], login: string): string {
   <section class="card">${
       rows === ""
         ? '\n    <p class="empty">No machines yet. Run <code>devnull-bridge login &lt;this server&gt;</code> on one.</p>'
-        : `\n    <ul>${rows}\n    </ul>`
+        : `\n    <ul class="tokens">${rows}\n    </ul>`
     }
   </section>`,
     { login },
