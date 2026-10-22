@@ -5,3 +5,5 @@ docs
 skills
 bin
 *.md
+.env*
+bridge.env

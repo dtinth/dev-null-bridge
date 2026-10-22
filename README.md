@@ -75,6 +75,8 @@ You need:
    approving logins.
 3. **A session secret**: 32 or more random characters (`openssl rand -hex 32`).
 
+[`.env.example`](.env.example) has them all: copy it to `bridge.env` and fill it in.
+
 | Variable | Default | |
 |---|---|---|
 | `BRIDGE_PUBLIC_URL` | `http://localhost:<port>` | Where the server is reached; used in login links and the OAuth callback |
