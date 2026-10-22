@@ -101,6 +101,10 @@ Without Docker: `bin/devnull-bridge-server serve` with Deno 2.x, `curl` and `ssh
   one to lock it out at once.
 - **Approve** (`/approve?code=…`): where `devnull-bridge login` sends you.
 
+Approve only a login you started yourself at a terminal, and check that the page's code matches
+that terminal's. The server is public, so anyone can make an approve link and send it to you; one
+you did not start gives them a token that posts as the bot.
+
 ### Moving from a single-machine bridge
 
 The server reads the same sqlite file, so threads, subscriptions and cursors carry over. Stop the
