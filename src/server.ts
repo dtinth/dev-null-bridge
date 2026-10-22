@@ -42,7 +42,7 @@ import {
 } from "./db.ts";
 import { pollerWarning } from "./poller.ts";
 import { postCommit } from "./post.ts";
-import { resolveRef, shortHashOf } from "./refs.ts";
+import { resolveRef } from "./refs.ts";
 import type { Runtime } from "./runtime.ts";
 import { messageJson } from "./types.ts";
 import { renderApprove, renderApproved, renderMessage, renderTokens } from "./web.ts";
@@ -259,7 +259,8 @@ export function createServer(
         await rt.writeFile(path, new Uint8Array(await image.arrayBuffer()));
         paths.push(path);
       }
-      const posted = await postCommit(rt, { replyTo: shortHashOf(parentId), images: paths, text });
+      // The full id, not the short hash: dev-null.sh refuses a hash more than one commit ends with.
+      const posted = await postCommit(rt, { replyTo: parentId, images: paths, text });
       recordPost(db, {
         id: posted.id,
         parentId,

@@ -37,7 +37,7 @@ export async function ensureCommitScript(rt: Runtime): Promise<string> {
 }
 
 export interface PostOptions {
-  /** Short hash (or link) of the commit to reply to. */
+  /** Id (or link) of the commit to reply to. */
   replyTo?: string;
   images: string[];
   text: string;

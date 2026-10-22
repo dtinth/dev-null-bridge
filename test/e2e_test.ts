@@ -165,7 +165,7 @@ Deno.test("reply posts through the server's commit script, follows the new commi
   assertEquals(posted.cmd, "bash");
   assertEquals(posted.args.slice(1), [
     "--reply",
-    "0000001",
+    ROOT,
     "--image",
     "/tmp/upload-1/image-1.png",
     "--",
