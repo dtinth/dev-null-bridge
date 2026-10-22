@@ -6,8 +6,10 @@ import { dashboardHandler } from "./dashboard.ts";
 import {
   addTree,
   countMessages,
+  fillPost,
   getMeta,
   listThreads,
+  postsMissingText,
   readMessages,
   recordPost,
   removeTree,
@@ -42,6 +44,7 @@ Usage:
   ${CLI_NAME} status                         Whether the poller is running, and what it holds
   ${CLI_NAME} poller                         Run the poller (a daemon: see the README)
   ${CLI_NAME} dashboard [--port 8787]        A web page on 127.0.0.1 listing every subscription
+  ${CLI_NAME} backfill                       Fetch the text of agent posts recorded without it
 
 A <commit> is its URL, its id, or the 7-character hash the site shows.
 Only replies by ${"$"}BRIDGE_AUTHORS (default: dtinth) are ever stored or printed.
@@ -145,6 +148,8 @@ export async function runCli(argv: string[], rt: Runtime): Promise<number> {
         return await poller(rt);
       case "dashboard":
         return await dashboard(rt, args);
+      case "backfill":
+        return await backfill(rt);
       default:
         throw new UsageError(`Unknown command ${command}. Try ${CLI_NAME} help.`);
     }
@@ -327,6 +332,26 @@ async function poller(rt: Runtime): Promise<number> {
     authors: allowedAuthors(rt.env),
     intervalMs: interval * 1000,
   });
+  return 0;
+}
+
+/** Posts recorded before `reply` kept their text get it from the public API, by full id. */
+async function backfill(rt: Runtime): Promise<number> {
+  const db = rt.openDb();
+  const api = createApi(rt.fetch, baseUrl(rt.env));
+  const bot = botUser(rt.env);
+  let filled = 0;
+  let missing = 0;
+  for (const id of postsMissingText(db)) {
+    const commit = await api.getCommit(id);
+    if (commit === null || commit.author !== bot) {
+      missing++;
+      continue;
+    }
+    fillPost(db, id, commit.body, commit.htmlUrl);
+    filled++;
+  }
+  rt.stdout(`filled ${filled} post(s)${missing === 0 ? "" : `, ${missing} not found`}\n`);
   return 0;
 }
 

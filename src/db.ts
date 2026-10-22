@@ -185,6 +185,16 @@ export function recordPost(
   });
 }
 
+/** Agent posts recorded without their text (before `reply` kept it), oldest first. */
+export function postsMissingText(db: Db): string[] {
+  return db.prepare("SELECT id FROM posts WHERE body IS NULL ORDER BY id").all()
+    .map((row) => String(row["id"]));
+}
+
+export function fillPost(db: Db, id: string, body: string, htmlUrl: string): void {
+  db.prepare("UPDATE posts SET body = ?, html_url = ? WHERE id = ?").run(body, htmlUrl, id);
+}
+
 function countSubscriptions(db: Db, subscriber: string): number {
   const row = db.prepare("SELECT COUNT(*) AS n FROM subscriptions WHERE subscriber = ?").get(
     subscriber,

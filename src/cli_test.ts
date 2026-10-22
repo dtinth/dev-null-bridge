@@ -1,6 +1,6 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { runCli } from "./cli.ts";
-import { ingest, readTree } from "./db.ts";
+import { ingest, readTree, recordPost } from "./db.ts";
 import { commitJson, fakeRuntime } from "./fake_runtime.ts";
 import { message, uuid } from "./test_util.ts";
 
@@ -210,4 +210,27 @@ Deno.test("an unknown command is a usage error; help is not", async () => {
   const rt = rtWithRoot();
   assertEquals(await runCli([], rt), 0);
   assertStringIncludes(rt.out.join(""), "Usage:");
+});
+
+Deno.test("backfill fills in the text of older agent posts it can find, and only the bot's", async () => {
+  const rt = fakeRuntime({
+    routes: {
+      [`${API}/${uuid(2)}`]: {
+        data: commitJson(uuid(2), ROOT, { body: "old reply", author: "dtinth-bot" }),
+      },
+      [`${API}/${uuid(3)}`]: { data: commitJson(uuid(3), ROOT, { body: "not ours" }) },
+    },
+  });
+  const db = rt.openDb();
+  for (const id of [uuid(2), uuid(3), uuid(4)]) {
+    recordPost(db, { id, parentId: ROOT, subscriber: "x", createdAt: "t" });
+  }
+
+  assertEquals(await runCli(["backfill"], rt), 0);
+
+  assertEquals(rt.out.join(""), "filled 1 post(s), 2 not found\n");
+  assertEquals(
+    readTree(db, "x", ROOT).filter((row) => row.kind === "post").map((row) => row.body),
+    ["old reply", null, null],
+  );
 });

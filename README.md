@@ -102,6 +102,7 @@ devnull-bridge dashboard                                                  # http
 | `status` | Whether the poller is running |
 | `poller` | Run the poller |
 | `dashboard [--port 8787]` | A read-only page on 127.0.0.1 listing every subscription, with a page per thread |
+| `backfill` | Fetch the text of agent posts recorded before `reply` kept it |
 
 ## Config
 
