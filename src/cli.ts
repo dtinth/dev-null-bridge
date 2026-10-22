@@ -41,7 +41,8 @@ Usage:
   ${CLI_NAME} reply <name> <commit> [--image path]... <text>
                                              Post a reply as the bot and follow it as <name>
   ${CLI_NAME} list [name]                    The threads each subscriber follows
-  ${CLI_NAME} status                         Whether the poller is running, and what it holds
+  ${CLI_NAME} status                         Who the bridge listens to and posts as, and whether
+                                             the poller is running
   ${CLI_NAME} poller                         Run the poller (a daemon: see the README)
   ${CLI_NAME} dashboard [--port 8787]        A web page on 127.0.0.1 listing every subscription
   ${CLI_NAME} backfill                       Fetch the text of agent posts recorded without it
@@ -316,6 +317,8 @@ function status(rt: Runtime): number {
   const db = rt.openDb();
   const heartbeat = getMeta(db, "poller_heartbeat");
   const warning = pollerWarning(db, rt.now());
+  rt.stdout(`listening to: ${allowedAuthors(rt.env).map((u) => `@${u}`).join(", ")}\n`);
+  rt.stdout(`posting as: @${botUser(rt.env)}\n`);
   rt.stdout(`messages stored: ${countMessages(db)}\n`);
   rt.stdout(`poller heartbeat: ${heartbeat ?? "never"}\n`);
   rt.stdout(`poller: ${warning === null ? "running" : `DOWN, ${warning}`}\n`);

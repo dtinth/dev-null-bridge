@@ -15,3 +15,9 @@ Deno.test("the skill's front matter is valid YAML with a name and a description"
   assertEquals(typeof front["description"], "string");
   assertStringIncludes(front["description"] as string, "dev-null.sh");
 });
+
+/** The bridge is meant for anyone: the skill reads names from `devnull-bridge status` instead. */
+Deno.test("the skill names no particular person or bot account", async () => {
+  const text = await Deno.readTextFile(SKILL);
+  assertEquals(/dtinth/i.test(text), false);
+});

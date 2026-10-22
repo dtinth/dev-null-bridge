@@ -205,6 +205,12 @@ Deno.test("status fails while the poller is down", async () => {
   assertStringIncludes(rt.out.join(""), "DOWN");
 });
 
+Deno.test("status says whose replies the bridge takes and which account it posts as", async () => {
+  const rt = fakeRuntime({ env: { BRIDGE_AUTHORS: "alice,bob", BRIDGE_BOT_USER: "alice-bot" } });
+  await runCli(["status"], rt);
+  assertStringIncludes(rt.out.join(""), "listening to: @alice, @bob\nposting as: @alice-bot\n");
+});
+
 Deno.test("an unknown command is a usage error; help is not", async () => {
   assertEquals(await runCli(["nope"], rtWithRoot()), 2);
   const rt = rtWithRoot();
