@@ -9,7 +9,13 @@ export interface FakeRuntime extends Runtime {
   files: Map<string, string>;
   clock: { time: number };
   fetched: string[];
-  served: { port: number; handler: (request: Request) => Response | Promise<Response> }[];
+  served: {
+    port: number;
+    hostname: string;
+    handler: (request: Request) => Response | Promise<Response>;
+  }[];
+  /** Files written with writeFile, by path; removed with their directory. */
+  binaries: Map<string, Uint8Array>;
 }
 
 export interface FakeOptions {
@@ -19,8 +25,8 @@ export interface FakeOptions {
   /** Text bodies by URL. */
   texts?: Record<string, string>;
   command?: (cmd: string, args: string[]) => CommandResult;
-  /** What is piped into the process; omitted, stdin is a terminal. */
-  stdin?: string;
+  /** Answers for any other request (a POST, a header check), after routes and texts. */
+  handle?: (request: Request) => Response | undefined;
 }
 
 export function fakeRuntime(options: FakeOptions = {}): FakeRuntime {
@@ -30,6 +36,8 @@ export function fakeRuntime(options: FakeOptions = {}): FakeRuntime {
   const files = new Map<string, string>();
   const clock = { time: Date.parse("2026-10-19T12:00:00Z") };
   const fetched: string[] = [];
+  const binaries = new Map<string, Uint8Array>();
+  let temps = 0;
 
   return {
     env: options.env ?? {},
@@ -38,12 +46,15 @@ export function fakeRuntime(options: FakeOptions = {}): FakeRuntime {
     files,
     clock,
     fetched,
+    binaries,
     served: [],
     commands: [],
     now: () => new Date(clock.time),
-    fetch: (input) => {
+    fetch: (input, init) => {
       const url = String(input);
       fetched.push(url);
+      const handled = options.handle?.(new Request(url, init));
+      if (handled !== undefined) return Promise.resolve(handled);
       const text = options.texts?.[url];
       if (text !== undefined) return Promise.resolve(new Response(text));
       const route = options.routes?.[url];
@@ -63,15 +74,25 @@ export function fakeRuntime(options: FakeOptions = {}): FakeRuntime {
       return Promise.resolve();
     },
     openDb: () => db,
-    serve(port, handler) {
-      this.served.push({ port, handler });
+    serve(port, hostname, handler) {
+      this.served.push({ port, hostname, handler });
       return Promise.resolve();
     },
     cacheDir: () => "/cache",
-    readStdin: () => Promise.resolve(options.stdin ?? null),
     readTextFile: (path) => Promise.resolve(files.get(path) ?? null),
     writeTextFile: (path, content) => {
       files.set(path, content);
+      return Promise.resolve();
+    },
+    makeTempDir: () => Promise.resolve(`/tmp/upload-${++temps}`),
+    writeFile: (path, content) => {
+      binaries.set(path, content);
+      return Promise.resolve();
+    },
+    removeDir: (path) => {
+      for (const file of [...binaries.keys()]) {
+        if (file.startsWith(`${path}/`)) binaries.delete(file);
+      }
       return Promise.resolve();
     },
   };

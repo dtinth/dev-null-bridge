@@ -1,15 +1,15 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
-import { runCli } from "./cli.ts";
+import { signSession } from "./auth.ts";
 import {
   collectDashboard,
   collectThread,
-  dashboardHandler,
   renderDashboard,
   renderThread,
   threadPath,
 } from "./dashboard.ts";
-import { addTree, ingest, openDbAt, recordPost, saveRoot, setMeta } from "./db.ts";
-import { commitJson, fakeRuntime } from "./fake_runtime.ts";
+import { addTree, type Db, ingest, openDbAt, recordPost, saveRoot, setMeta } from "./db.ts";
+import { fakeRuntime } from "./fake_runtime.ts";
+import { createServer } from "./server.ts";
 import { message, uuid } from "./test_util.ts";
 
 const NOW = new Date("2026-10-19T12:00:30Z");
@@ -37,6 +37,30 @@ function populated() {
   ingest(db, [message(uuid(3), uuid(2), { createdAt: "2026-10-19T12:00:10Z" })]);
   addTree(db, "beta", uuid(50));
   return db;
+}
+
+const SECRET = "a session secret that is long enough";
+
+/** The server's web UI over a database, as the signed-in dtinth sees it. */
+async function signedIn(db: Db) {
+  const rt = fakeRuntime();
+  rt.clock.time = NOW.getTime();
+  rt.openDb = () => db;
+  const handler = createServer(rt, db, {
+    authors: ["dtinth"],
+    botUser: "dtinth-bot",
+    devnullUrl: "https://dev-null.sh",
+    publicUrl: "https://bridge.example",
+    oauth: { clientId: "c", clientSecret: "s" },
+    sessionSecret: SECRET,
+  });
+  const cookie = `bridge_session=${await signSession(
+    "dtinth",
+    new Date(NOW.getTime() + 60_000),
+    SECRET,
+  )}`;
+  return (path: string) =>
+    handler(new Request(`https://bridge.example${path}`, { headers: { cookie } }));
 }
 
 Deno.test("each subscriber lists how many commit ids it follows and its threads", () => {
@@ -81,7 +105,7 @@ Deno.test("the page shows the numbers and escapes everything it prints", () => {
   );
   addTree(db, "evil<b>", uuid(60));
 
-  const html = renderDashboard(collectDashboard(db, NOW));
+  const html = renderDashboard(collectDashboard(db, NOW), "dtinth");
 
   assertStringIncludes(html, "alpha");
   assertStringIncludes(html, "3<span> commit ids followed</span>");
@@ -93,41 +117,25 @@ Deno.test("the page shows the numbers and escapes everything it prints", () => {
 
 Deno.test("an empty bridge says how to start", () => {
   assertStringIncludes(
-    renderDashboard(collectDashboard(openDbAt(":memory:"), NOW)),
+    renderDashboard(collectDashboard(openDbAt(":memory:"), NOW), "dtinth"),
     "No subscriptions yet",
   );
 });
 
-Deno.test("the handler serves the page and the state as JSON, and nothing else", async () => {
-  const handle = dashboardHandler(populated(), () => NOW);
+Deno.test("the server serves the page and the state as JSON, with the signed-in nav", async () => {
+  const get = await signedIn(populated());
 
-  const page = handle(new Request("http://127.0.0.1/"));
+  const page = await get("/");
   assertStringIncludes(page.headers.get("content-type")!, "text/html");
-  assertStringIncludes(await page.text(), "alpha");
+  const html = await page.text();
+  assertStringIncludes(html, "alpha");
+  assertStringIncludes(html, '<a href="/tokens">Tokens</a>');
+  assertStringIncludes(html, "@dtinth");
 
-  const state = await handle(new Request("http://127.0.0.1/state.json")).json();
+  const state = await (await get("/state.json")).json();
   assertEquals(state.subscribers.length, 2);
 
-  assertEquals(handle(new Request("http://127.0.0.1/other")).status, 404);
-  assertEquals(handle(new Request("http://127.0.0.1/", { method: "POST" })).status, 405);
-});
-
-Deno.test("the dashboard command serves on the given port", async () => {
-  const rt = fakeRuntime({
-    routes: {
-      [`https://dev-null.sh/api/v1/commits/${R}`]: {
-        data: commitJson(R, null, { body: "Build X" }),
-      },
-    },
-  });
-  await runCli(["watch", "alpha", R], rt);
-
-  assertEquals(await runCli(["dashboard", "--port", "9123"], rt), 0);
-
-  assertEquals(rt.served.map((s) => s.port), [9123]);
-  const served = await rt.served[0]!.handler(new Request("http://127.0.0.1:9123/"));
-  assertStringIncludes(await served.text(), "Build X");
-  assertEquals(await runCli(["dashboard", "--port", "70000"], rt), 2);
+  assertEquals((await get("/other")).status, 404);
 });
 
 Deno.test("a thread page lists what was said in it, in order, as the subscriber sees it", () => {
@@ -153,7 +161,7 @@ Deno.test("a thread page lists what was said in it, in order, as the subscriber 
   assertEquals(collectThread(db, "beta", R), null);
   assertEquals(collectThread(db, "nobody", R), null);
 
-  const html = renderThread(thread);
+  const html = renderThread(thread, "dtinth");
   assertStringIncludes(html, "Build the bridge\nand more");
   assertStringIncludes(html, "via alpha");
   assertStringIncludes(html, "↳ 0000001");
@@ -167,23 +175,23 @@ Deno.test("a thread page escapes what it prints and links only http(s) images", 
     message(uuid(6), uuid(3), { body: "<img src=x onerror=alert(1)>", images: ["javascript:x"] }),
   ]);
 
-  const html = renderThread(collectThread(db, "alpha", R)!);
+  const html = renderThread(collectThread(db, "alpha", R)!, "dtinth");
 
   assertEquals(html.includes("<img"), false);
   assertStringIncludes(html, "&lt;img src=x");
   assertEquals(html.includes('href="javascript:'), false);
 });
 
-Deno.test("the subscriptions page links each thread to its page, which the handler serves", async () => {
-  const handle = dashboardHandler(populated(), () => NOW);
+Deno.test("the subscriptions page links each thread to its page, which the server serves", async () => {
+  const get = await signedIn(populated());
 
-  const list = await handle(new Request("http://127.0.0.1/")).text();
+  const list = await (await get("/")).text();
   assertStringIncludes(list, `href="${threadPath("alpha", R)}"`);
 
-  const page = handle(new Request(`http://127.0.0.1${threadPath("alpha", R)}`));
+  const page = await get(threadPath("alpha", R));
   assertEquals(page.status, 200);
   assertStringIncludes(await page.text(), "On it");
 
-  assertEquals(handle(new Request(`http://127.0.0.1${threadPath("beta", R)}`)).status, 404);
-  assertEquals(handle(new Request("http://127.0.0.1/threads/alpha")).status, 404);
+  assertEquals((await get(threadPath("beta", R))).status, 404);
+  assertEquals((await get("/threads/alpha")).status, 404);
 });

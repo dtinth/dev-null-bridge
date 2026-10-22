@@ -1,6 +1,6 @@
 /**
- * Every external effect goes through here, so the CLI can be tested without a network, a clock, a
- * subprocess or a real database. (Same idea as claw's agent CLI.)
+ * Every external effect of the server goes through here, so it can be tested without a network, a
+ * clock, a subprocess or a real database. (Same idea as claw's agent CLI.)
  */
 import type { Db } from "./db.ts";
 
@@ -21,12 +21,18 @@ export interface Runtime {
   openDb(): Db;
   /** Directory for things the bridge downloads, such as the commit script. */
   cacheDir(): string;
-  /** Serve HTTP on 127.0.0.1 until the process is stopped. */
-  serve(port: number, handler: (request: Request) => Response | Promise<Response>): Promise<void>;
-  /** Everything piped into the process, or null when stdin is a terminal. */
-  readStdin(): Promise<string | null>;
+  /** Serve HTTP until the process is stopped. */
+  serve(
+    port: number,
+    hostname: string,
+    handler: (request: Request) => Response | Promise<Response>,
+  ): Promise<void>;
   readTextFile(path: string): Promise<string | null>;
   writeTextFile(path: string, content: string): Promise<void>;
+  /** A new private directory for files that only live while one request is handled. */
+  makeTempDir(): Promise<string>;
+  writeFile(path: string, content: Uint8Array): Promise<void>;
+  removeDir(path: string): Promise<void>;
 }
 
 /** Who may give instructions: only these authors' replies are ever stored. */

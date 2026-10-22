@@ -9,6 +9,8 @@
  *   own id is in its set; the poller adds each new message whose parent is in the set, and `reply`
  *   adds the commit it posts. A watch is therefore a filter over what is stored: watching a commit
  *   adds the whole known tree under it.
+ * - `tokens`: the machines allowed to use the API, by the SHA-256 of their token (never the token).
+ * - `logins`: `devnull-bridge login` requests waiting for a person to approve them in the browser.
  */
 import { DatabaseSync } from "node:sqlite";
 import type { Message } from "./types.ts";
@@ -52,6 +54,20 @@ CREATE TABLE IF NOT EXISTS roots (
 CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS tokens (
+  id TEXT PRIMARY KEY,
+  hash TEXT NOT NULL UNIQUE,
+  label TEXT NOT NULL,
+  approved_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  last_used_at TEXT
+);
+CREATE TABLE IF NOT EXISTS logins (
+  code TEXT PRIMARY KEY,
+  token_hash TEXT NOT NULL UNIQUE,
+  label TEXT NOT NULL,
+  created_at TEXT NOT NULL
 );
 CREATE VIEW IF NOT EXISTS edges AS
   SELECT id, parent_id FROM messages WHERE parent_id IS NOT NULL
@@ -335,4 +351,89 @@ export function saveRoot(db: Db, root: Message): void {
   db.prepare(
     "INSERT OR REPLACE INTO roots (id, author, body, html_url, created_at) VALUES (?, ?, ?, ?, ?)",
   ).run(root.id, root.author, root.body, root.htmlUrl, root.createdAt);
+}
+
+/** How long a login request waits for approval. */
+export const LOGIN_TTL_MS = 10 * 60_000;
+
+export interface TokenInfo {
+  id: string;
+  label: string;
+  approvedBy: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+
+function toTokenInfo(row: Record<string, unknown>): TokenInfo {
+  return {
+    id: String(row["id"]),
+    label: String(row["label"]),
+    approvedBy: String(row["approved_by"]),
+    createdAt: String(row["created_at"]),
+    lastUsedAt: row["last_used_at"] === null ? null : String(row["last_used_at"]),
+  };
+}
+
+/** Records a login request; requests older than {@link LOGIN_TTL_MS} are dropped first. */
+export function startLogin(
+  db: Db,
+  login: { code: string; tokenHash: string; label: string; now: Date },
+): void {
+  db.prepare("DELETE FROM logins WHERE created_at < ?").run(
+    new Date(login.now.getTime() - LOGIN_TTL_MS).toISOString(),
+  );
+  db.prepare("INSERT INTO logins (code, token_hash, label, created_at) VALUES (?, ?, ?, ?)")
+    .run(login.code, login.tokenHash, login.label, login.now.toISOString());
+}
+
+/** A login request still waiting for approval, or null. */
+export function findLogin(
+  db: Db,
+  code: string,
+  now: Date,
+): { label: string; createdAt: string } | null {
+  const row = db.prepare("SELECT label, created_at FROM logins WHERE code = ? AND created_at >= ?")
+    .get(code, new Date(now.getTime() - LOGIN_TTL_MS).toISOString());
+  return row === undefined
+    ? null
+    : { label: String(row["label"]), createdAt: String(row["created_at"]) };
+}
+
+/** Turns a waiting login into a token. False when there is no such request (or it expired). */
+export function approveLogin(db: Db, code: string, approvedBy: string, now: Date): boolean {
+  return inTransaction(db, () => {
+    const row = db.prepare(
+      "SELECT token_hash, label FROM logins WHERE code = ? AND created_at >= ?",
+    ).get(code, new Date(now.getTime() - LOGIN_TTL_MS).toISOString());
+    if (row === undefined) return false;
+    db.prepare("DELETE FROM logins WHERE code = ?").run(code);
+    db.prepare(
+      "INSERT INTO tokens (id, hash, label, approved_by, created_at) VALUES (?, ?, ?, ?, ?)",
+    ).run(
+      crypto.randomUUID(),
+      String(row["token_hash"]),
+      String(row["label"]),
+      approvedBy,
+      now.toISOString(),
+    );
+    return true;
+  });
+}
+
+/** The token with this hash, marked as used now, or null when there is none. */
+export function useToken(db: Db, hash: string, now: Date): TokenInfo | null {
+  const row = db.prepare("SELECT * FROM tokens WHERE hash = ?").get(hash);
+  if (row === undefined) return null;
+  db.prepare("UPDATE tokens SET last_used_at = ? WHERE hash = ?").run(now.toISOString(), hash);
+  return toTokenInfo(row);
+}
+
+/** Every token, newest first. */
+export function listTokens(db: Db): TokenInfo[] {
+  return db.prepare("SELECT * FROM tokens ORDER BY created_at DESC, id").all().map(toTokenInfo);
+}
+
+/** Revokes a token. False when there was none with that id. */
+export function deleteToken(db: Db, id: string): boolean {
+  return Number(db.prepare("DELETE FROM tokens WHERE id = ?").run(id).changes) > 0;
 }

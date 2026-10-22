@@ -4,8 +4,26 @@
  * in, and nothing older than the last 20 replies is ever missed unless 20 arrive between two polls.
  */
 import type { Api } from "./api.ts";
-import { type Db, ingest, setMeta } from "./db.ts";
+import { type Db, getMeta, ingest, setMeta } from "./db.ts";
 import type { Runtime } from "./runtime.ts";
+
+/** How long without a heartbeat before the poller counts as down. */
+export const STALE_POLLER_MS = 120_000;
+
+/** A sentence for the CLI to warn with when the poller has not run lately, or null when it is fine. */
+export function pollerWarning(db: Db, now: Date): string | null {
+  const heartbeat = getMeta(db, "poller_heartbeat");
+  if (heartbeat === null) {
+    return "the server's poller has never run, so nothing new will arrive.";
+  }
+  const age = now.getTime() - Date.parse(heartbeat);
+  if (age > STALE_POLLER_MS) {
+    return `the server's poller has not run for ${
+      Math.round(age / 1000)
+    }s, so nothing new will arrive.`;
+  }
+  return null;
+}
 
 /** One round. Returns how many messages were new. */
 export async function pollOnce(

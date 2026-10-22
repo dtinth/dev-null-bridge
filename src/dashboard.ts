@@ -1,10 +1,10 @@
 /**
- * `dashboard`: a read-only page on 127.0.0.1 listing every subscriber, how many commits each
- * follows, and the threads those make up, with a page per thread showing what was said in it.
- * Everything comes from the sqlite file the agents share.
+ * The dashboard: a page listing every subscriber, how many commits each follows, and the threads
+ * those make up, with a page per thread showing what was said in it. Everything comes from the
+ * server's sqlite file.
  */
 import { countMessages, type Db, getMeta, listThreads, readTree, type TreeRow } from "./db.ts";
-import { STALE_POLLER_MS } from "./longpoll.ts";
+import { STALE_POLLER_MS } from "./poller.ts";
 import { shortHashOf } from "./refs.ts";
 
 export interface ThreadInfo {
@@ -164,6 +164,12 @@ const STYLE =
   .entry .body { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 0; }
   .entry .note { color: var(--muted); font-size: 13px; margin: 4px 0 0; }
   .entry .images a { font-size: 13px; margin-right: 10px; }
+  nav { display: flex; gap: 14px; align-items: baseline; margin: 0 0 18px; font-size: 14px; }
+  nav .who { margin-left: auto; color: var(--muted); }
+  nav form { display: inline; }
+  button { font: inherit; padding: 4px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .code { font: 600 24px ui-monospace, monospace; letter-spacing: .08em; margin: 8px 0 12px; }
 `;
 
 /**
@@ -212,22 +218,22 @@ export function threadPath(subscriber: string, rootId: string): string {
   return `/threads/${encodeURIComponent(subscriber)}/${encodeURIComponent(rootId)}`;
 }
 
-function escapeHtml(text: string): string {
+export function escapeHtml(text: string): string {
   return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 }
 
 /** Only http(s) links are ever made clickable. */
-function link(url: string | null, text: string): string {
+export function link(url: string | null, text: string): string {
   if (url === null || !/^https?:\/\//.test(url)) return escapeHtml(text);
   return `<a href="${escapeHtml(url)}">${escapeHtml(text)}</a>`;
 }
 
-function plural(n: number, one: string, many: string = `${one}s`): string {
+export function plural(n: number, one: string, many: string = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
-export function renderDashboard(data: DashboardData): string {
+export function renderDashboard(data: DashboardData, login: string): string {
   const poller = data.poller;
   const pollerText = poller.heartbeat === null
     ? "never ran"
@@ -262,41 +268,41 @@ export function renderDashboard(data: DashboardData): string {
       </section>`;
   }).join("");
 
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="5">
-<title>dev-null-bridge</title>
-<style>
-${STYLE}</style>
-</head>
-<body>
-<main>
-  <h1>dev-null-bridge</h1>
+  return page(
+    "dev-null-bridge",
+    `  <h1>dev-null-bridge</h1>
   <p class="status"><span class="dot${poller.running ? " ok" : ""}"></span>poller ${
-    escapeHtml(pollerText)
-  } · ${plural(data.messages, "message")} stored · ${
-    plural(data.subscribers.length, "subscriber")
-  }</p>${
-    cards === ""
-      ? '\n  <p class="empty">No subscriptions yet. Run <code>devnull-bridge watch &lt;name&gt; &lt;commit&gt;</code>.</p>'
-      : cards
-  }
-</main>
-</body>
-</html>
-`;
+      escapeHtml(pollerText)
+    } · ${plural(data.messages, "message")} stored · ${
+      plural(data.subscribers.length, "subscriber")
+    }</p>${
+      cards === ""
+        ? '\n  <p class="empty">No subscriptions yet. Run <code>devnull-bridge watch &lt;name&gt; &lt;commit&gt;</code>.</p>'
+        : cards
+    }`,
+    { login, refresh: true },
+  );
 }
 
-function page(title: string, body: string, refresh: boolean): string {
+/** A whole page; with a login, it has the nav bar of the signed-in UI. */
+export function page(
+  title: string,
+  body: string,
+  options: { login?: string; refresh?: boolean } = {},
+): string {
+  const nav = options.login === undefined ? "" : `  <nav>
+    <a href="/">Subscriptions</a>
+    <a href="/tokens">Tokens</a>
+    <span class="who">@${escapeHtml(options.login)}</span>
+    <form method="post" action="/auth/logout"><button>Log out</button></form>
+  </nav>
+`;
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">${
-    refresh ? '\n<meta http-equiv="refresh" content="5">' : ""
+    options.refresh ? '\n<meta http-equiv="refresh" content="5">' : ""
   }
 <title>${escapeHtml(title)}</title>
 <style>
@@ -304,14 +310,14 @@ ${STYLE}</style>
 </head>
 <body>
 <main>
-${body}
+${nav}${body}
 </main>
 </body>
 </html>
 `;
 }
 
-export function renderThread(thread: ThreadData): string {
+export function renderThread(thread: ThreadData, login: string): string {
   const entries = thread.entries.map((entry, index) => {
     const previous = thread.entries[index - 1];
     // A thread is shown flat; a reply that does not follow the commit above it says what it answers.
@@ -350,43 +356,6 @@ export function renderThread(thread: ThreadData): string {
     }</p>
   <section class="card">${entries}
   </section>`,
-    false,
+    { login },
   );
-}
-
-export function dashboardHandler(
-  db: Db,
-  now: () => Date,
-  links: Links = DEFAULT_LINKS,
-): (request: Request) => Response {
-  return (request) => {
-    const url = new URL(request.url);
-    if (request.method !== "GET") return new Response("method not allowed", { status: 405 });
-
-    const threadMatch = url.pathname.match(/^\/threads\/([^/]+)\/([^/]+)$/);
-    if (threadMatch !== null) {
-      const thread = collectThread(
-        db,
-        decodeURIComponent(threadMatch[1]!),
-        decodeURIComponent(threadMatch[2]!),
-        links,
-      );
-      if (thread === null) return new Response("no such thread", { status: 404 });
-      return new Response(renderThread(thread), {
-        headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
-      });
-    }
-
-    if (url.pathname === "/") {
-      return new Response(renderDashboard(collectDashboard(db, now())), {
-        headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
-      });
-    }
-    if (url.pathname === "/state.json") {
-      return Response.json(collectDashboard(db, now()), {
-        headers: { "cache-control": "no-store" },
-      });
-    }
-    return new Response("not found", { status: 404 });
-  };
 }

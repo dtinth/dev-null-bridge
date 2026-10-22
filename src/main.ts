@@ -1,5 +1,5 @@
 /**
- * devnull-bridge — entry point. Wires {@link Runtime} to the real Deno APIs and runs.
+ * devnull-bridge-server — entry point. Wires {@link Runtime} to the real Deno APIs and runs.
  */
 import { runCli } from "./cli.ts";
 import { openDbAt } from "./db.ts";
@@ -55,13 +55,9 @@ const runtime: Runtime = {
     Deno.mkdirSync(dirname(path), { recursive: true });
     return openDbAt(path);
   },
-  serve: (port, handler) =>
-    Deno.serve({ hostname: "127.0.0.1", port, onListen: () => {} }, handler).finished,
+  serve: (port, hostname, handler) =>
+    Deno.serve({ hostname, port, onListen: () => {} }, handler).finished,
   cacheDir: () => `${env["XDG_CACHE_HOME"] ?? `${home}/.cache`}/dev-null-bridge`,
-  async readStdin() {
-    if (Deno.stdin.isTerminal()) return null;
-    return await new Response(Deno.stdin.readable).text();
-  },
   async readTextFile(path) {
     try {
       return await Deno.readTextFile(path);
@@ -74,6 +70,9 @@ const runtime: Runtime = {
     await Deno.mkdir(dirname(path), { recursive: true });
     await Deno.writeTextFile(path, content, { mode: 0o600 });
   },
+  makeTempDir: () => Deno.makeTempDir({ prefix: "devnull-bridge-" }),
+  writeFile: (path, content) => Deno.writeFile(path, content, { mode: 0o600 }),
+  removeDir: (path) => Deno.remove(path, { recursive: true }),
 };
 
 if (import.meta.main) {
