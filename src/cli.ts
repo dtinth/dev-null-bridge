@@ -1,7 +1,7 @@
 /**
  * Command dispatch. Every external effect goes through {@link Runtime}.
  */
-import { createApi } from "./api.ts";
+import { type Api, ApiError, createApi } from "./api.ts";
 import { dashboardHandler } from "./dashboard.ts";
 import {
   addTree,
@@ -343,7 +343,7 @@ async function backfill(rt: Runtime): Promise<number> {
   let filled = 0;
   let missing = 0;
   for (const id of postsMissingText(db)) {
-    const commit = await api.getCommit(id);
+    const commit = await getCommitPolitely(rt, api, id);
     if (commit === null || commit.author !== bot) {
       missing++;
       continue;
@@ -353,6 +353,20 @@ async function backfill(rt: Runtime): Promise<number> {
   }
   rt.stdout(`filled ${filled} post(s)${missing === 0 ? "" : `, ${missing} not found`}\n`);
   return 0;
+}
+
+/** One lookup a second, waiting a minute when the site says to slow down (three tries). */
+async function getCommitPolitely(rt: Runtime, api: Api, id: string): Promise<Message | null> {
+  for (let attempt = 1;; attempt++) {
+    await rt.sleep(1000);
+    try {
+      return await api.getCommit(id);
+    } catch (error) {
+      if (!(error instanceof ApiError && error.status === 429) || attempt === 3) throw error;
+      rt.stderr("rate limited, waiting a minute\n");
+      await rt.sleep(60_000);
+    }
+  }
 }
 
 async function dashboard(rt: Runtime, args: string[]): Promise<number> {

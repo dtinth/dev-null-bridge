@@ -234,3 +234,25 @@ Deno.test("backfill fills in the text of older agent posts it can find, and only
     ["old reply", null, null],
   );
 });
+
+Deno.test("backfill waits and tries again when the site rate-limits it", async () => {
+  const rt = fakeRuntime({
+    routes: {
+      [`${API}/${uuid(2)}`]: { data: commitJson(uuid(2), ROOT, { author: "dtinth-bot" }) },
+    },
+  });
+  const fetchRoute = rt.fetch;
+  let limited = 1;
+  rt.fetch = (input, init) =>
+    limited-- > 0
+      ? Promise.resolve(new Response("slow down", { status: 429 }))
+      : fetchRoute(input, init);
+  recordPost(rt.openDb(), { id: uuid(2), parentId: ROOT, subscriber: "x", createdAt: "t" });
+  const started = rt.now().getTime();
+
+  assertEquals(await runCli(["backfill"], rt), 0);
+
+  assertEquals(rt.out.join(""), "filled 1 post(s)\n");
+  assertStringIncludes(rt.err.join(""), "rate limited");
+  assertEquals(rt.now().getTime() - started >= 60_000, true);
+});
