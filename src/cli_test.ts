@@ -88,6 +88,9 @@ Deno.test("export writes the data to a file, for the Data page to import", async
   assertEquals(new TextDecoder().decode(file.subarray(0, 15)), "SQLite format 3");
   assertStringIncludes(rt.out.join(""), "wrote bridge.db: 0 messages, 1 subscriptions");
   assertEquals(await runCli(["export"], rt), 2);
+  // Never over an existing file, such as the live database.
+  assertEquals(await runCli(["export", "bridge.db"], rt), 1);
+  assertStringIncludes(rt.err.join(""), "already exists");
 });
 
 Deno.test("the server's config needs both halves of the OAuth app and a long session secret", () => {

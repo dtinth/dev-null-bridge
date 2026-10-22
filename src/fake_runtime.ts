@@ -96,6 +96,7 @@ export function fakeRuntime(options: FakeOptions = {}): FakeRuntime {
     makePrivateDir: () => Promise.resolve(),
     makeTempDir: () => Promise.resolve(`/tmp/upload-${++temps}`),
     writeFile: (path, content) => {
+      if (binaries.has(path)) return Promise.reject(new Error(`${path} already exists`));
       binaries.set(path, content);
       return Promise.resolve();
     },

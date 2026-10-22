@@ -127,7 +127,7 @@ const MAX_JSON_BYTES = 16 * 1024;
 /** Three images and their text, with room for the multipart framing. */
 const MAX_REPLY_BYTES = MAX_IMAGES * MAX_IMAGE_BYTES + 1024 * 1024;
 /** The largest database file an import takes. */
-const MAX_IMPORT_BYTES = 64 * 1024 * 1024;
+const MAX_IMPORT_BYTES = 16 * 1024 * 1024;
 const DATA_LINK = { href: "/data", text: "Back to Data" };
 /** Login requests waiting for approval at once; more is someone filling the database. */
 const MAX_PENDING_LOGINS = 50;
@@ -471,16 +471,23 @@ export function createServer(
       });
     }
     if (url.pathname === "/data/import" && request.method === "POST") {
-      let file: FormDataEntryValue | null;
+      let form: FormData | null;
       try {
         const body = await limitedBody(request, MAX_IMPORT_BYTES);
-        file = (await new Response(body, { headers: request.headers }).formData()).get("file");
+        form = await new Response(body, { headers: request.headers }).formData();
       } catch (error) {
-        if (error instanceof HttpError) throw error;
-        file = null;
+        if (!(error instanceof HttpError)) form = null;
+        else return html(renderMessage("Not imported", "That file is over 16 MB.", DATA_LINK), 413);
       }
+      const file = form?.get("file");
       if (!(file instanceof File) || file.size === 0) {
         return html(renderMessage("No file", "Choose a .db file to import.", DATA_LINK), 400);
+      }
+      if (form?.get("replace") !== "yes") {
+        return html(
+          renderMessage("Not imported", "Tick the box to replace what is here.", DATA_LINK),
+          400,
+        );
       }
       try {
         const counts = importData(db, new Uint8Array(await file.arrayBuffer()));

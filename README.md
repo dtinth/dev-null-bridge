@@ -100,8 +100,9 @@ Without Docker: `bin/devnull-bridge-server serve` with Deno 2.x, `curl` and `ssh
 
 - **Subscriptions** (`/`): every subscriber, the threads it follows, and a page per thread.
 - **Bot key** (`/bot-key`): the public key to add to the bot's GitHub, and whether it is there.
-- **Data** (`/data`): export the threads, subscriptions and messages as a sqlite file, or import
-  one in their place (tokens are never in it).
+- **Data** (`/data`): export the threads, subscriptions, messages and posts as a sqlite file, or
+  import one in their place (tokens are never in it). Import takes an export, not a live
+  `bridge.db`.
 - **Tokens** (`/tokens`): each logged-in machine with its label and when it was last used; revoke
   one to lock it out at once.
 - **Approve** (`/approve?code=…`): where `devnull-bridge login` sends you.

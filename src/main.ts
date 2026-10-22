@@ -79,7 +79,8 @@ const runtime: Runtime = {
     await Deno.chmod(path, 0o700);
   },
   makeTempDir: () => Deno.makeTempDir({ prefix: "devnull-bridge-" }),
-  writeFile: (path, content) => Deno.writeFile(path, content, { mode: 0o600 }),
+  // Never over an existing file (export could otherwise clobber the live database).
+  writeFile: (path, content) => Deno.writeFile(path, content, { mode: 0o600, createNew: true }),
   removeDir: (path) => Deno.remove(path, { recursive: true }),
 };
 

@@ -244,6 +244,10 @@ Deno.test("the Data page exports the database and imports one in its place", asy
   const into = await signedIn(empty);
   const form = new FormData();
   form.append("file", new File([file], "bridge.db"));
+  const unticked = await into("/data/import", { method: "POST", body: form });
+  assertEquals(unticked.status, 400);
+  assertEquals(collectDashboard(empty, NOW).subscribers, []);
+  form.append("replace", "yes");
   const imported = await into("/data/import", { method: "POST", body: form });
   assertEquals(imported.status, 200);
   assertStringIncludes(await imported.text(), "subscriptions</span><span>4</span>");
@@ -251,6 +255,7 @@ Deno.test("the Data page exports the database and imports one in its place", asy
 
   const junk = new FormData();
   junk.append("file", new File(["hello"], "notes.txt"));
+  junk.append("replace", "yes");
   const refused = await into("/data/import", { method: "POST", body: junk });
   assertEquals(refused.status, 400);
   assertStringIncludes(await refused.text(), "not a sqlite file");

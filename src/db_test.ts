@@ -213,21 +213,20 @@ Deno.test("export carries everything but tokens; import replaces it and keeps th
     posts: 1,
     subscriptions: 3,
     roots: 0,
-    meta: 1,
   });
   assertEquals(readMessages(server, "alpha").map((m) => m.id), [R, B1]);
   assertEquals(findIdsByShortHash(server, B2.replaceAll("-", "").slice(-7)), []);
-  assertEquals(getMeta(server, "poller_heartbeat"), "then");
+  // The heartbeat is this server's own.
+  assertEquals(getMeta(server, "poller_heartbeat"), null);
   assertEquals(listTokens(server).map((t) => t.label), ["box"]);
   assertEquals(listTokens(openDbAt(":memory:")).length, 0);
 });
 
-Deno.test("import takes an older bridge's WAL-mode file and refuses what is not a bridge database", () => {
+Deno.test("import takes an older bridge's tables, and refuses a live WAL file or what does not fit", () => {
   const dir = Deno.makeTempDirSync();
   try {
     const path = `${dir}/bridge.db`;
     const old = new DatabaseSync(path);
-    old.exec("PRAGMA journal_mode = WAL");
     old.exec(
       "CREATE TABLE posts (id TEXT PRIMARY KEY, parent_id TEXT NOT NULL, subscriber TEXT NOT NULL, created_at TEXT NOT NULL)",
     );
@@ -238,12 +237,32 @@ Deno.test("import takes an older bridge's WAL-mode file and refuses what is not 
     old.exec("INSERT INTO posts VALUES ('p', 'r', 'x', 't')");
     old.exec("INSERT INTO subscriptions VALUES ('x', 'r')");
     old.close();
-    const bytes = Deno.readFileSync(path);
-    assertEquals(bytes[18], 2);
-
     const server = openDbAt(":memory:");
-    assertEquals(importData(server, bytes).posts, 1);
+    assertEquals(importData(server, Deno.readFileSync(path)).posts, 1);
     assertEquals(server.prepare("SELECT body FROM posts").get()?.["body"], null);
+
+    const live = new DatabaseSync(`${dir}/live.db`);
+    live.exec(
+      "PRAGMA journal_mode = WAL; CREATE TABLE messages (id); CREATE TABLE subscriptions (x)",
+    );
+    live.close();
+    assertThrows(
+      () => importData(server, Deno.readFileSync(`${dir}/live.db`)),
+      NotADatabase,
+      "devnull-bridge-server export",
+    );
+
+    const misfit = new DatabaseSync(`${dir}/misfit.db`);
+    misfit.exec(
+      "CREATE TABLE messages (id TEXT); CREATE TABLE subscriptions (subscriber, commit_id)",
+    );
+    misfit.exec("INSERT INTO messages VALUES ('m')");
+    misfit.close();
+    assertThrows(
+      () => importData(server, Deno.readFileSync(`${dir}/misfit.db`)),
+      NotADatabase,
+      "does not fit",
+    );
 
     const other = new DatabaseSync(`${dir}/other.db`);
     other.exec("CREATE TABLE t (x)");

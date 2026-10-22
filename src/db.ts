@@ -450,22 +450,31 @@ export function deleteToken(db: Db, id: string): boolean {
   return Number(db.prepare("DELETE FROM tokens WHERE id = ?").run(id).changes) > 0;
 }
 
-/** What export and import carry: everything but who may log in. */
-const DATA_TABLES = ["messages", "posts", "subscriptions", "roots", "meta"] as const;
+/**
+ * What export and import carry: everything but who may log in, and meta (the poller's heartbeat
+ * belongs to the process that wrote it).
+ */
+const DATA_TABLES = ["messages", "posts", "subscriptions", "roots"] as const;
 
 /** Thrown when an uploaded file is not a bridge database. */
 export class NotADatabase extends Error {}
 
-/** Loads a database file into memory. A WAL file's header is marked rollback: memory has no WAL. */
+/**
+ * Loads a database file into memory. A live bridge.db (WAL mode) is refused: its latest writes may
+ * still be in the -wal file next to it, which an upload leaves behind, and nothing in the file says.
+ */
 function loadCopy(bytes: Uint8Array): Db {
   const header = new TextDecoder().decode(bytes.subarray(0, 16));
   if (header !== "SQLite format 3\0") throw new NotADatabase("That is not a sqlite file.");
-  const copy = new Uint8Array(bytes);
-  if (copy[18] === 2) copy[18] = 1;
-  if (copy[19] === 2) copy[19] = 1;
+  if (bytes[18] === 2 || bytes[19] === 2) {
+    throw new NotADatabase(
+      "That is a live bridge.db, whose newest writes may be in its -wal file. " +
+        "Run devnull-bridge-server export next to it and import what it writes.",
+    );
+  }
   const db = new DatabaseSync(":memory:");
   try {
-    db.deserialize(copy);
+    db.deserialize(bytes);
     // Its views and triggers come from the upload: never run functions from them.
     db.exec("PRAGMA trusted_schema = OFF");
     db.prepare("SELECT count(*) FROM sqlite_master").get();
@@ -516,11 +525,16 @@ export function importData(db: Db, bytes: Uint8Array): Record<string, number> {
   if (!tables.has("messages") || !tables.has("subscriptions")) {
     throw new NotADatabase("That sqlite file is not a dev-null-bridge database.");
   }
-  // An older bridge's file: bring it up to this schema first.
-  source.exec(SCHEMA);
-  addMissingColumns(source, "posts", ["body TEXT", "html_url TEXT"]);
-
-  const counts = inTransaction(db, () => copyData(source, db));
-  source.close();
-  return counts;
+  try {
+    // An older bridge's file: bring it up to this schema first.
+    source.exec(SCHEMA);
+    addMissingColumns(source, "posts", ["body TEXT", "html_url TEXT"]);
+    return inTransaction(db, () => copyData(source, db));
+  } catch (error) {
+    // A file whose tables do not fit (the transaction rolled back): say why, briefly.
+    const reason = (error as Error).message.split("\n")[0]!.slice(0, 200);
+    throw new NotADatabase(`That file does not fit this bridge's tables: ${reason}`);
+  } finally {
+    source.close();
+  }
 }

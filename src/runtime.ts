@@ -35,6 +35,7 @@ export interface Runtime {
   makePrivateDir(path: string): Promise<void>;
   /** A new private directory for files that only live while one request is handled. */
   makeTempDir(): Promise<string>;
+  /** Write a new file (only the owner can read it); fails if one is there. */
   writeFile(path: string, content: Uint8Array): Promise<void>;
   removeDir(path: string): Promise<void>;
 }

@@ -80,7 +80,9 @@ export function renderData(login: string): string {
     an export, or what <code>devnull-bridge-server export</code> wrote on a single-machine bridge.
     Tokens and the bot key stay.</p>
     <form method="post" action="/data/import" enctype="multipart/form-data">
-      <input type="file" name="file" accept=".db,.sqlite,.sqlite3,application/vnd.sqlite3" required>
+      <p><input type="file" name="file" accept=".db,.sqlite,.sqlite3,application/vnd.sqlite3" required></p>
+      <p><label><input type="checkbox" name="replace" value="yes" required> Replace what is here
+      (<a href="/data/export">export it first</a> to keep a copy)</label></p>
       <button class="primary">Import</button>
     </form>
   </section>`,
