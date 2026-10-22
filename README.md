@@ -101,7 +101,7 @@ devnull-bridge dashboard                                                  # http
 | `list [name]` | The threads each subscriber follows |
 | `status` | Whether the poller is running |
 | `poller` | Run the poller |
-| `dashboard [--port 8787]` | A read-only page on 127.0.0.1 listing every subscription |
+| `dashboard [--port 8787]` | A read-only page on 127.0.0.1 listing every subscription, with a page per thread |
 
 ## Config
 

@@ -1,4 +1,5 @@
 import { assertEquals } from "@std/assert";
+import { DatabaseSync } from "node:sqlite";
 import {
   addTree,
   findIdsByShortHash,
@@ -153,4 +154,34 @@ Deno.test("meta values can be set and replaced", () => {
   setMeta(db, "k", "1");
   setMeta(db, "k", "2");
   assertEquals(getMeta(db, "k"), "2");
+});
+
+Deno.test("a database made before posts kept their text gains the columns", () => {
+  const path = Deno.makeTempFileSync({ suffix: ".db" });
+  try {
+    const old = new DatabaseSync(path);
+    old.exec(
+      "CREATE TABLE posts (id TEXT PRIMARY KEY, parent_id TEXT NOT NULL, subscriber TEXT NOT NULL, created_at TEXT NOT NULL)",
+    );
+    old.exec("INSERT INTO posts VALUES ('p', 'r', 'x', 't')");
+    old.close();
+
+    const db = openDbAt(path);
+    recordPost(db, { id: "q", parentId: "r", subscriber: "x", createdAt: "t", body: "hi" });
+
+    assertEquals(
+      db.prepare("SELECT id, body FROM posts ORDER BY id").all().map((r) => [r["id"], r["body"]]),
+      [["p", null], ["q", "hi"]],
+    );
+    db.close();
+  } finally {
+    Deno.removeSync(path);
+    for (const suffix of ["-wal", "-shm"]) {
+      try {
+        Deno.removeSync(path + suffix);
+      } catch {
+        // SQLite removes them itself when the last connection closes.
+      }
+    }
+  }
 });

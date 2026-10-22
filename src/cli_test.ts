@@ -1,6 +1,6 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { runCli } from "./cli.ts";
-import { ingest } from "./db.ts";
+import { ingest, readTree } from "./db.ts";
 import { commitJson, fakeRuntime } from "./fake_runtime.ts";
 import { message, uuid } from "./test_util.ts";
 
@@ -137,6 +137,13 @@ Deno.test("reply posts through the commit script, follows the new commit and get
   ]);
   assertEquals(rt.files.get("/cache/commit.sh"), COMMIT_SCRIPT);
   assertStringIncludes(rt.out.join(""), `x follows ${uuid(2)}`);
+  const post = readTree(rt.openDb(), "x", ROOT).find((row) => row.id === uuid(2))!;
+  assertEquals([post.kind, post.body, post.htmlUrl, post.postedBy], [
+    "post",
+    "Done, see image",
+    `https://dev-null.sh/@dtinth-bot/commits/${uuid(2)}`,
+    "x",
+  ]);
 
   // dtinth answers the commit the bridge posted.
   ingest(rt.openDb(), [message(uuid(5), uuid(2), { body: "thanks" })]);

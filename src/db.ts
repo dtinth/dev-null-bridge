@@ -3,7 +3,8 @@
  * writer and many readers get along).
  *
  * - `messages`: every reply by an allowed author the poller has seen.
- * - `posts`: the commits agents posted through `reply`, so a thread can pass through them.
+ * - `posts`: the commits agents posted through `reply`, so a thread can pass through them, with
+ *   their text and URL (kept for the dashboard; posts recorded before that have neither).
  * - `subscriptions`: `(subscriber, commit_id)`. A subscriber receives a message when the message's
  *   own id is in its set; the poller adds each new message whose parent is in the set, and `reply`
  *   adds the commit it posts. A watch is therefore a filter over what is stored: watching a commit
@@ -30,7 +31,9 @@ CREATE TABLE IF NOT EXISTS posts (
   id TEXT PRIMARY KEY,
   parent_id TEXT NOT NULL,
   subscriber TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  body TEXT,
+  html_url TEXT
 );
 CREATE INDEX IF NOT EXISTS posts_parent ON posts (parent_id);
 CREATE TABLE IF NOT EXISTS subscriptions (
@@ -61,7 +64,18 @@ export function openDbAt(path: string): Db {
   if (path !== ":memory:") db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA busy_timeout = 5000");
   db.exec(SCHEMA);
+  addMissingColumns(db, "posts", ["body TEXT", "html_url TEXT"]);
   return db;
+}
+
+/** Brings a table created by an older version up to date. */
+function addMissingColumns(db: Db, table: string, columns: string[]): void {
+  const existing = new Set(
+    db.prepare(`PRAGMA table_info(${table})`).all().map((row) => String(row["name"])),
+  );
+  for (const column of columns) {
+    if (!existing.has(column.split(" ")[0]!)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column}`);
+  }
 }
 
 function inTransaction<T>(db: Db, fn: () => T): T {
@@ -143,13 +157,27 @@ export function removeTree(db: Db, subscriber: string, rootId: string): number {
  */
 export function recordPost(
   db: Db,
-  post: { id: string; parentId: string; subscriber: string; createdAt: string },
+  post: {
+    id: string;
+    parentId: string;
+    subscriber: string;
+    createdAt: string;
+    body?: string;
+    htmlUrl?: string;
+  },
 ): void {
   inTransaction(db, () => {
     db.prepare(
-      "INSERT OR IGNORE INTO posts (id, parent_id, subscriber, created_at) VALUES (?, ?, ?, ?)",
+      "INSERT OR IGNORE INTO posts (id, parent_id, subscriber, created_at, body, html_url) VALUES (?, ?, ?, ?, ?, ?)",
     )
-      .run(post.id, post.parentId, post.subscriber, post.createdAt);
+      .run(
+        post.id,
+        post.parentId,
+        post.subscriber,
+        post.createdAt,
+        post.body ?? null,
+        post.htmlUrl ?? null,
+      );
     db.prepare(
       "INSERT OR IGNORE INTO subscriptions (subscriber, commit_id) SELECT subscriber, ? FROM subscriptions WHERE commit_id = ?",
     ).run(post.id, post.parentId);
@@ -205,6 +233,66 @@ export function listThreads(
     subscriber: String(row["subscriber"]),
     commitId: String(row["commit_id"]),
   }));
+}
+
+export interface TreeRow {
+  id: string;
+  parentId: string | null;
+  /** What is stored about the commit: a reply by an allowed author, an agent's post, or a watched root. */
+  kind: "message" | "post" | "root" | "unknown";
+  author: string | null;
+  body: string | null;
+  htmlUrl: string | null;
+  createdAt: string | null;
+  images: string[];
+  /** The subscriber whose `reply` posted it (posts only). */
+  postedBy: string | null;
+  /** Whether the given subscriber follows it. */
+  followed: boolean;
+}
+
+/** A commit and everything known under it, in id (time) order, as seen by one subscriber. */
+export function readTree(db: Db, subscriber: string, rootId: string): TreeRow[] {
+  const rows = db.prepare(
+    `WITH RECURSIVE tree(id, parent_id) AS (
+       SELECT ?, NULL UNION SELECT e.id, e.parent_id FROM edges e JOIN tree t ON e.parent_id = t.id
+     )
+     SELECT t.id, t.parent_id,
+       m.id IS NOT NULL AS is_message, p.id IS NOT NULL AS is_post, r.id IS NOT NULL AS is_root,
+       COALESCE(m.author, r.author) AS author,
+       COALESCE(m.body, p.body, r.body) AS body,
+       COALESCE(m.html_url, p.html_url, r.html_url) AS html_url,
+       COALESCE(m.created_at, p.created_at, r.created_at) AS created_at,
+       m.images, p.subscriber AS posted_by,
+       EXISTS (SELECT 1 FROM subscriptions s WHERE s.subscriber = ? AND s.commit_id = t.id)
+         AS followed
+     FROM tree t
+     LEFT JOIN messages m ON m.id = t.id
+     LEFT JOIN posts p ON p.id = t.id
+     LEFT JOIN roots r ON r.id = t.id
+     ORDER BY t.id`,
+  ).all(rootId, subscriber);
+  return rows.map((row): TreeRow => {
+    const text = (key: string) => (row[key] === null ? null : String(row[key]));
+    return {
+      id: String(row["id"]),
+      parentId: row["id"] === rootId ? null : text("parent_id"),
+      kind: Number(row["is_message"])
+        ? "message"
+        : Number(row["is_post"])
+        ? "post"
+        : Number(row["is_root"])
+        ? "root"
+        : "unknown",
+      author: text("author"),
+      body: text("body"),
+      htmlUrl: text("html_url"),
+      createdAt: text("created_at"),
+      images: row["images"] === null ? [] : JSON.parse(String(row["images"])) as string[],
+      postedBy: text("posted_by"),
+      followed: Number(row["followed"]) === 1,
+    };
+  });
 }
 
 /** Ids of stored commits (messages and agent posts) whose short hash is the given one. */

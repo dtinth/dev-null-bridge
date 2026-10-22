@@ -285,7 +285,14 @@ async function reply(rt: Runtime, args: string[]): Promise<number> {
   });
 
   const posted = await postCommit(rt, { replyTo: shortHashOf(parentId), images, text });
-  recordPost(db, { id: posted.id, parentId, subscriber: name, createdAt: rt.now().toISOString() });
+  recordPost(db, {
+    id: posted.id,
+    parentId,
+    subscriber: name,
+    createdAt: rt.now().toISOString(),
+    body: text,
+    htmlUrl: posted.url,
+  });
 
   rt.stdout(`Posted ${posted.url}\n${name} follows ${posted.id}\n`);
   return 0;
@@ -331,6 +338,12 @@ async function dashboard(rt: Runtime, args: string[]): Promise<number> {
   }
 
   rt.stderr(`dashboard on http://127.0.0.1:${port}\n`);
-  await rt.serve(port, dashboardHandler(rt.openDb(), () => rt.now()));
+  await rt.serve(
+    port,
+    dashboardHandler(rt.openDb(), () => rt.now(), {
+      baseUrl: baseUrl(rt.env),
+      botUser: botUser(rt.env),
+    }),
+  );
   return 0;
 }

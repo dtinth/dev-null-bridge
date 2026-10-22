@@ -1,8 +1,9 @@
 /**
  * `dashboard`: a read-only page on 127.0.0.1 listing every subscriber, how many commits each
- * follows, and the threads those make up. Everything comes from the sqlite file the agents share.
+ * follows, and the threads those make up, with a page per thread showing what was said in it.
+ * Everything comes from the sqlite file the agents share.
  */
-import { countMessages, type Db, getMeta, listThreads } from "./db.ts";
+import { countMessages, type Db, getMeta, listThreads, readTree, type TreeRow } from "./db.ts";
 import { STALE_POLLER_MS } from "./longpoll.ts";
 import { shortHashOf } from "./refs.ts";
 
@@ -31,6 +32,35 @@ export interface DashboardData {
   poller: { heartbeat: string | null; ageSeconds: number | null; running: boolean };
   messages: number;
   subscribers: SubscriberInfo[];
+}
+
+export interface Links {
+  baseUrl: string;
+  botUser: string;
+}
+
+const DEFAULT_LINKS: Links = { baseUrl: "https://dev-null.sh", botUser: "dtinth-bot" };
+
+export interface ThreadEntry {
+  id: string;
+  shortHash: string;
+  /** The commit it replies to, inside this thread; null for the first commit. */
+  parentId: string | null;
+  author: string | null;
+  body: string | null;
+  url: string;
+  createdAt: string | null;
+  images: string[];
+  /** The subscriber whose `reply` posted it, for an agent's post. */
+  postedBy: string | null;
+  followed: boolean;
+}
+
+export interface ThreadData {
+  subscriber: string;
+  rootId: string;
+  shortHash: string;
+  entries: ThreadEntry[];
 }
 
 function number(row: Record<string, unknown> | undefined, key: string): number {
@@ -100,6 +130,88 @@ export function collectDashboard(db: Db, now: Date): DashboardData {
   };
 }
 
+const STYLE =
+  `  :root { color-scheme: light dark; --bg: #f6f6f4; --card: #fff; --ink: #1c1c1a; --muted: #6b6b66; --line: #e3e3de; --ok: #1a7f46; --bad: #b3261e; --accent: #3a5ccc; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #151514; --card: #1f1f1d; --ink: #ececE8; --muted: #9a9a93; --line: #33332f; --ok: #55c28a; --bad: #f2877f; --accent: #8da4f5; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px 16px 48px; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .status { color: var(--muted); margin: 0 0 20px; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; background: var(--bad); }
+  .dot.ok { background: var(--ok); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; margin: 0 0 14px; }
+  .card header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  h2 { font-size: 17px; margin: 0; font-family: ui-monospace, monospace; }
+  .big { font-size: 28px; font-weight: 650; margin: 0; }
+  .big span { font-size: 13px; font-weight: 400; color: var(--muted); }
+  .meta { color: var(--muted); margin: 2px 0 10px; font-size: 13px; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li { display: flex; gap: 10px; align-items: baseline; padding: 7px 0; border-top: 1px solid var(--line); }
+  code { font: 13px ui-monospace, monospace; color: var(--muted); }
+  .excerpt { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .count { color: var(--muted); font-size: 13px; white-space: nowrap; }
+  a { color: var(--accent); }
+  .empty { color: var(--muted); }
+  .hash code { color: var(--accent); }
+  .back { display: inline-block; margin: 0 0 12px; }
+  .entry { position: relative; padding: 10px 0 10px 14px; border-top: 1px solid var(--line); }
+  .entry:first-child { border-top: 0; padding-top: 0; }
+  .entry.unfollowed { opacity: .55; }
+  .entry .who { font-weight: 600; }
+  .entry .who.bot { color: var(--accent); }
+  .entry .when { color: var(--muted); font-size: 13px; }
+  .entry .body { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 0; }
+  .entry .note { color: var(--muted); font-size: 13px; margin: 4px 0 0; }
+  .entry .images a { font-size: 13px; margin-right: 10px; }
+`;
+
+/**
+ * One thread as a subscriber sees it: the commit it started from and everything known under it,
+ * depth first, oldest reply first. Null when the subscriber does not follow that commit.
+ */
+export function collectThread(
+  db: Db,
+  subscriber: string,
+  rootId: string,
+  links: Links = DEFAULT_LINKS,
+): ThreadData | null {
+  const rows = readTree(db, subscriber, rootId);
+  if (!rows.some((row) => row.id === rootId && row.followed)) return null;
+
+  const children = new Map<string | null, TreeRow[]>();
+  for (const row of rows) {
+    const siblings = children.get(row.parentId) ?? [];
+    siblings.push(row);
+    children.set(row.parentId, siblings);
+  }
+
+  const entries: ThreadEntry[] = [];
+  const visit = (row: TreeRow) => {
+    const author = row.kind === "post" ? links.botUser : row.author;
+    entries.push({
+      id: row.id,
+      shortHash: shortHashOf(row.id),
+      parentId: row.parentId,
+      author,
+      body: row.body,
+      url: row.htmlUrl ?? `${links.baseUrl}/@${author ?? links.botUser}/commits/${row.id}`,
+      createdAt: row.createdAt,
+      images: row.images,
+      postedBy: row.postedBy,
+      followed: row.followed,
+    });
+    for (const child of children.get(row.id) ?? []) visit(child);
+  };
+  for (const row of children.get(null) ?? []) visit(row);
+
+  return { subscriber, rootId, shortHash: shortHashOf(rootId), entries };
+}
+
+export function threadPath(subscriber: string, rootId: string): string {
+  return `/threads/${encodeURIComponent(subscriber)}/${encodeURIComponent(rootId)}`;
+}
+
 function escapeHtml(text: string): string {
   return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;").replaceAll("'", "&#39;");
@@ -126,7 +238,9 @@ export function renderDashboard(data: DashboardData): string {
   const cards = data.subscribers.map((subscriber) => {
     const threads = subscriber.threads.map((thread) => `
         <li>
-          <code>${escapeHtml(thread.shortHash)}</code>
+          <a class="hash" href="${threadPath(subscriber.name, thread.rootId)}"><code>${
+      escapeHtml(thread.shortHash)
+    }</code></a>
           <span class="excerpt">${
       thread.excerpt === null ? "<em>no preview</em>" : link(thread.url, thread.excerpt)
     }</span>
@@ -156,29 +270,7 @@ export function renderDashboard(data: DashboardData): string {
 <meta http-equiv="refresh" content="5">
 <title>dev-null-bridge</title>
 <style>
-  :root { color-scheme: light dark; --bg: #f6f6f4; --card: #fff; --ink: #1c1c1a; --muted: #6b6b66; --line: #e3e3de; --ok: #1a7f46; --bad: #b3261e; --accent: #3a5ccc; }
-  @media (prefers-color-scheme: dark) { :root { --bg: #151514; --card: #1f1f1d; --ink: #ececE8; --muted: #9a9a93; --line: #33332f; --ok: #55c28a; --bad: #f2877f; --accent: #8da4f5; } }
-  * { box-sizing: border-box; }
-  body { margin: 0; padding: 24px 16px 48px; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, sans-serif; }
-  main { max-width: 760px; margin: 0 auto; }
-  h1 { font-size: 20px; margin: 0 0 4px; }
-  .status { color: var(--muted); margin: 0 0 20px; }
-  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; background: var(--bad); }
-  .dot.ok { background: var(--ok); }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; margin: 0 0 14px; }
-  .card header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
-  h2 { font-size: 17px; margin: 0; font-family: ui-monospace, monospace; }
-  .big { font-size: 28px; font-weight: 650; margin: 0; }
-  .big span { font-size: 13px; font-weight: 400; color: var(--muted); }
-  .meta { color: var(--muted); margin: 2px 0 10px; font-size: 13px; }
-  ul { list-style: none; margin: 0; padding: 0; }
-  li { display: flex; gap: 10px; align-items: baseline; padding: 7px 0; border-top: 1px solid var(--line); }
-  code { font: 13px ui-monospace, monospace; color: var(--muted); }
-  .excerpt { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-  .count { color: var(--muted); font-size: 13px; white-space: nowrap; }
-  a { color: var(--accent); }
-  .empty { color: var(--muted); }
-</style>
+${STYLE}</style>
 </head>
 <body>
 <main>
@@ -198,10 +290,92 @@ export function renderDashboard(data: DashboardData): string {
 `;
 }
 
-export function dashboardHandler(db: Db, now: () => Date): (request: Request) => Response {
+function page(title: string, body: string, refresh: boolean): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">${
+    refresh ? '\n<meta http-equiv="refresh" content="5">' : ""
+  }
+<title>${escapeHtml(title)}</title>
+<style>
+${STYLE}</style>
+</head>
+<body>
+<main>
+${body}
+</main>
+</body>
+</html>
+`;
+}
+
+export function renderThread(thread: ThreadData): string {
+  const entries = thread.entries.map((entry, index) => {
+    const previous = thread.entries[index - 1];
+    // A thread is shown flat; a reply that does not follow the commit above it says what it answers.
+    const branch = entry.parentId === null || entry.parentId === previous?.id
+      ? ""
+      : ` · ↳ ${escapeHtml(shortHashOf(entry.parentId))}`;
+    const who = entry.author === null ? "unknown" : `@${entry.author}`;
+    const by = entry.postedBy === null
+      ? ""
+      : ` <span class="when">via ${escapeHtml(entry.postedBy)}</span>`;
+    const body = entry.body === null
+      ? `<p class="note">${
+        entry.postedBy === null ? "Not stored." : "Posted before the bridge kept agents' text."
+      }</p>`
+      : `<p class="body">${escapeHtml(entry.body)}</p>`;
+    const images = entry.images.length === 0
+      ? ""
+      : `<p class="images">${
+        entry.images.map((image, index) => link(image, `image ${index + 1}`)).join("")
+      }</p>`;
+    return `
+    <article class="entry${entry.followed ? "" : " unfollowed"}">
+      <span class="who${entry.postedBy === null ? "" : " bot"}">${escapeHtml(who)}</span>${by}
+      <span class="when">· ${link(entry.url, entry.shortHash)}${
+      entry.createdAt === null ? "" : ` · ${escapeHtml(entry.createdAt)}`
+    }${branch}${entry.followed ? "" : " · not followed"}</span>${body}${images}
+    </article>`;
+  }).join("");
+
+  return page(
+    `${thread.shortHash} · ${thread.subscriber} · dev-null-bridge`,
+    `  <a class="back" href="/">← all subscriptions</a>
+  <h1>Thread <code>${escapeHtml(thread.shortHash)}</code></h1>
+  <p class="status">as seen by <code>${escapeHtml(thread.subscriber)}</code> · ${
+      plural(thread.entries.length, "commit")
+    }</p>
+  <section class="card">${entries}
+  </section>`,
+    false,
+  );
+}
+
+export function dashboardHandler(
+  db: Db,
+  now: () => Date,
+  links: Links = DEFAULT_LINKS,
+): (request: Request) => Response {
   return (request) => {
     const url = new URL(request.url);
     if (request.method !== "GET") return new Response("method not allowed", { status: 405 });
+
+    const threadMatch = url.pathname.match(/^\/threads\/([^/]+)\/([^/]+)$/);
+    if (threadMatch !== null) {
+      const thread = collectThread(
+        db,
+        decodeURIComponent(threadMatch[1]!),
+        decodeURIComponent(threadMatch[2]!),
+        links,
+      );
+      if (thread === null) return new Response("no such thread", { status: 404 });
+      return new Response(renderThread(thread), {
+        headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+      });
+    }
 
     if (url.pathname === "/") {
       return new Response(renderDashboard(collectDashboard(db, now())), {
