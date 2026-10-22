@@ -3,10 +3,10 @@
   "version": "0.0.0",
   "exports": "./src/main.ts",
   "tasks": {
-    "start": "deno run --allow-read --allow-write --allow-net --allow-env --allow-run=bash --allow-sys src/main.ts",
+    "server": "deno run --allow-read --allow-write --allow-net --allow-env --allow-run=bash,ssh-keygen --allow-sys src/main.ts serve",
     "test": "deno test --allow-read --allow-write --allow-net --allow-env --allow-sys",
-    "check": "deno check src/",
-    "ci": "deno fmt --check && deno lint && deno check src/ && deno task test"
+    "check": "deno check src/ agent/",
+    "ci": "deno fmt --check && deno lint && deno check src/ agent/ && deno task test"
   },
   "imports": {
     "@std/assert": "jsr:@std/assert@^1.0.19",

@@ -1,8 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="760" height="250" viewBox="0 0 760 250" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="300" viewBox="0 0 760 300" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif">
   <style>
     .box { fill: #f6f8fa; stroke: #57606a; stroke-width: 1.5; }
     .db { fill: #ddf4ff; stroke: #0969da; }
     .agent { fill: #fff8c5; stroke: #9a6700; }
+    .machine { fill: none; stroke: #57606a; stroke-width: 1.2; stroke-dasharray: 5 4; }
     .line { stroke: #57606a; stroke-width: 1.5; fill: none; }
     .title { fill: #1f2328; font-size: 16px; font-weight: 600; text-anchor: middle; }
     .sub { fill: #59636e; font-size: 12px; text-anchor: middle; }
@@ -13,7 +14,7 @@
       .box { fill: #161b22; stroke: #8b949e; }
       .db { fill: #0c2d6b; stroke: #4493f8; }
       .agent { fill: #3b2300; stroke: #d29922; }
-      .line { stroke: #8b949e; }
+      .machine, .line { stroke: #8b949e; }
       .head { fill: #8b949e; }
       .title { fill: #f0f6fc; }
       .sub, .label { fill: #9198a1; }
@@ -25,34 +26,36 @@
     </marker>
   </defs>
 
-  <!-- top row: site → poller → database -->
-  <rect class="box" x="20" y="30" width="150" height="56" rx="10"/>
-  <text class="title" x="95" y="63">dev-null.sh</text>
+  <!-- top row: site ⇄ server -->
+  <rect class="box" x="20" y="36" width="160" height="64" rx="10"/>
+  <text class="title" x="100" y="73">dev-null.sh</text>
 
-  <path class="line" d="M170 58 H318" marker-end="url(#arrow)"/>
-  <text class="label" x="244" y="48">public API, every 20 s</text>
+  <path class="line" d="M182 56 H378" marker-end="url(#arrow)"/>
+  <text class="label" x="280" y="47">your replies, every 20 s</text>
+  <path class="line" d="M378 82 H182" marker-end="url(#arrow)"/>
+  <text class="label" x="280" y="100">posts as the bot</text>
 
-  <rect class="box" x="320" y="30" width="130" height="56" rx="10"/>
-  <text class="title" x="385" y="63">poller</text>
+  <rect class="box db" x="380" y="24" width="360" height="88" rx="10"/>
+  <text class="title" x="560" y="54">server</text>
+  <text class="sub" x="560" y="76">poller · <tspan class="mono">bridge.db</tspan> · the bot's SSH key · web UI</text>
+  <text class="sub" x="560" y="96">on your VPS</text>
 
-  <path class="line" d="M450 58 H548" marker-end="url(#arrow)"/>
-  <text class="label" x="499" y="48">writes</text>
+  <!-- machines reaching the server -->
+  <path class="line" d="M215 198 C215 150 470 150 500 114" marker-end="url(#arrow)"/>
+  <path class="line" d="M560 198 C560 160 600 150 620 114" marker-end="url(#arrow)"/>
+  <text class="label" x="395" y="186">HTTPS + a token per machine</text>
 
-  <rect class="box db" x="550" y="24" width="180" height="68" rx="10"/>
-  <text class="title mono" x="640" y="55">bridge.db</text>
-  <text class="sub" x="640" y="75">sqlite, WAL</text>
+  <rect class="machine" x="80" y="198" width="270" height="70" rx="12"/>
+  <rect class="box agent" x="96" y="212" width="110" height="42" rx="10"/>
+  <text class="title" x="151" y="238">session</text>
+  <rect class="box agent" x="224" y="212" width="110" height="42" rx="10"/>
+  <text class="title" x="279" y="238">session</text>
 
-  <!-- sessions reading the database -->
-  <path class="line" d="M395 170 C395 130 600 130 610 94" marker-end="url(#arrow)"/>
-  <path class="line" d="M535 170 C535 140 640 130 640 94" marker-end="url(#arrow)"/>
-  <path class="line" d="M675 170 C675 140 670 130 670 94" marker-end="url(#arrow)"/>
+  <rect class="machine" x="440" y="198" width="240" height="70" rx="12"/>
+  <rect class="box agent" x="456" y="212" width="110" height="42" rx="10"/>
+  <text class="title" x="511" y="238">session</text>
+  <rect class="box agent" x="574" y="212" width="90" height="42" rx="10"/>
+  <text class="title" x="619" y="238">…</text>
 
-  <rect class="box agent" x="340" y="170" width="110" height="44" rx="10"/>
-  <text class="title" x="395" y="197">session</text>
-  <rect class="box agent" x="480" y="170" width="110" height="44" rx="10"/>
-  <text class="title" x="535" y="197">session</text>
-  <rect class="box agent" x="620" y="170" width="110" height="44" rx="10"/>
-  <text class="title" x="675" y="197">session</text>
-
-  <text class="label" x="535" y="238"><tspan class="mono">devnull-bridge long-poll &lt;name&gt;</tspan> (one per session)</text>
+  <text class="label" x="380" y="292">each machine runs <tspan class="mono">devnull-bridge</tspan>, with no SSH key</text>
 </svg>

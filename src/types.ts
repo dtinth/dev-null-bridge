@@ -11,9 +11,9 @@ export interface Message {
   createdAt: string;
 }
 
-/** One JSON line per message, the shape `read`, `watch` and `long-poll` print. */
-export function formatMessage(message: Message): string {
-  return JSON.stringify({
+/** The JSON shape the API sends and the CLI prints, one line per message. */
+export function messageJson(message: Message): Record<string, unknown> {
+  return {
     id: message.id,
     short_hash: message.shortHash,
     parent_id: message.parentId,
@@ -22,5 +22,5 @@ export function formatMessage(message: Message): string {
     images: message.images,
     html_url: message.htmlUrl,
     created_at: message.createdAt,
-  });
+  };
 }

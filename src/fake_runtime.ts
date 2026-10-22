@@ -9,7 +9,13 @@ export interface FakeRuntime extends Runtime {
   files: Map<string, string>;
   clock: { time: number };
   fetched: string[];
-  served: { port: number; handler: (request: Request) => Response | Promise<Response> }[];
+  served: {
+    port: number;
+    hostname: string;
+    handler: (request: Request) => Response | Promise<Response>;
+  }[];
+  /** Files written with writeFile, by path; removed with their directory. */
+  binaries: Map<string, Uint8Array>;
 }
 
 export interface FakeOptions {
@@ -18,10 +24,14 @@ export interface FakeOptions {
   routes?: Record<string, unknown>;
   /** Text bodies by URL. */
   texts?: Record<string, string>;
+  /** Answers for subprocesses; by default they succeed, and ssh-keygen -f makes a key. */
   command?: (cmd: string, args: string[]) => CommandResult;
-  /** What is piped into the process; omitted, stdin is a terminal. */
-  stdin?: string;
+  /** Answers for any other request (a POST, a header check), after routes and texts. */
+  handle?: (request: Request) => Response | undefined;
 }
+
+/** The public key the fake ssh-keygen makes, without its comment. */
+export const FAKE_PUBLIC_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeKey";
 
 export function fakeRuntime(options: FakeOptions = {}): FakeRuntime {
   const db = openDbAt(":memory:");
@@ -30,6 +40,8 @@ export function fakeRuntime(options: FakeOptions = {}): FakeRuntime {
   const files = new Map<string, string>();
   const clock = { time: Date.parse("2026-10-19T12:00:00Z") };
   const fetched: string[] = [];
+  const binaries = new Map<string, Uint8Array>();
+  let temps = 0;
 
   return {
     env: options.env ?? {},
@@ -38,12 +50,15 @@ export function fakeRuntime(options: FakeOptions = {}): FakeRuntime {
     files,
     clock,
     fetched,
+    binaries,
     served: [],
     commands: [],
     now: () => new Date(clock.time),
-    fetch: (input) => {
+    fetch: (input, init) => {
       const url = String(input);
       fetched.push(url);
+      const handled = options.handle?.(new Request(url, init));
+      if (handled !== undefined) return Promise.resolve(handled);
       const text = options.texts?.[url];
       if (text !== undefined) return Promise.resolve(new Response(text));
       const route = options.routes?.[url];
@@ -54,24 +69,41 @@ export function fakeRuntime(options: FakeOptions = {}): FakeRuntime {
     stderr: (text) => void err.push(text),
     runCommand(cmd, args, env) {
       this.commands.push({ cmd, args, env });
-      return Promise.resolve(
-        options.command?.(cmd, args) ?? { code: 0, stdout: "", stderr: "" },
-      );
+      if (options.command !== undefined) return Promise.resolve(options.command(cmd, args));
+      const keyPath = args[args.indexOf("-f") + 1];
+      if (cmd === "ssh-keygen" && keyPath !== undefined) {
+        files.set(keyPath, "PRIVATE KEY");
+        files.set(`${keyPath}.pub`, `${FAKE_PUBLIC_KEY} ${args[args.indexOf("-C") + 1]}\n`);
+      }
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
     },
     sleep: (ms) => {
       clock.time += ms;
       return Promise.resolve();
     },
     openDb: () => db,
-    serve(port, handler) {
-      this.served.push({ port, handler });
+    serve(port, hostname, handler) {
+      this.served.push({ port, hostname, handler });
       return Promise.resolve();
     },
     cacheDir: () => "/cache",
-    readStdin: () => Promise.resolve(options.stdin ?? null),
+    dataDir: () => "/data",
     readTextFile: (path) => Promise.resolve(files.get(path) ?? null),
     writeTextFile: (path, content) => {
       files.set(path, content);
+      return Promise.resolve();
+    },
+    makePrivateDir: () => Promise.resolve(),
+    makeTempDir: () => Promise.resolve(`/tmp/upload-${++temps}`),
+    writeFile: (path, content) => {
+      if (binaries.has(path)) return Promise.reject(new Error(`${path} already exists`));
+      binaries.set(path, content);
+      return Promise.resolve();
+    },
+    removeDir: (path) => {
+      for (const file of [...binaries.keys()]) {
+        if (file.startsWith(`${path}/`)) binaries.delete(file);
+      }
       return Promise.resolve();
     },
   };

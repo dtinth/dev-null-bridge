@@ -9,6 +9,8 @@
  *   own id is in its set; the poller adds each new message whose parent is in the set, and `reply`
  *   adds the commit it posts. A watch is therefore a filter over what is stored: watching a commit
  *   adds the whole known tree under it.
+ * - `tokens`: the machines allowed to use the API, by the SHA-256 of their token (never the token).
+ * - `logins`: `devnull-bridge login` requests waiting for a person to approve them in the browser.
  */
 import { DatabaseSync } from "node:sqlite";
 import type { Message } from "./types.ts";
@@ -53,6 +55,21 @@ CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS tokens (
+  id TEXT PRIMARY KEY,
+  hash TEXT NOT NULL UNIQUE,
+  label TEXT NOT NULL,
+  approved_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  last_used_at TEXT
+);
+CREATE TABLE IF NOT EXISTS logins (
+  code TEXT PRIMARY KEY,
+  token_hash TEXT NOT NULL UNIQUE,
+  label TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS logins_created ON logins (created_at);
 CREATE VIEW IF NOT EXISTS edges AS
   SELECT id, parent_id FROM messages WHERE parent_id IS NOT NULL
   UNION
@@ -335,4 +352,189 @@ export function saveRoot(db: Db, root: Message): void {
   db.prepare(
     "INSERT OR REPLACE INTO roots (id, author, body, html_url, created_at) VALUES (?, ?, ?, ?, ?)",
   ).run(root.id, root.author, root.body, root.htmlUrl, root.createdAt);
+}
+
+/** How long a login request waits for approval. */
+export const LOGIN_TTL_MS = 10 * 60_000;
+
+export interface TokenInfo {
+  id: string;
+  label: string;
+  approvedBy: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+
+function toTokenInfo(row: Record<string, unknown>): TokenInfo {
+  return {
+    id: String(row["id"]),
+    label: String(row["label"]),
+    approvedBy: String(row["approved_by"]),
+    createdAt: String(row["created_at"]),
+    lastUsedAt: row["last_used_at"] === null ? null : String(row["last_used_at"]),
+  };
+}
+
+/** Records a login request; requests older than {@link LOGIN_TTL_MS} are dropped first. */
+export function startLogin(
+  db: Db,
+  login: { code: string; tokenHash: string; label: string; now: Date },
+): void {
+  db.prepare("DELETE FROM logins WHERE created_at < ?").run(
+    new Date(login.now.getTime() - LOGIN_TTL_MS).toISOString(),
+  );
+  // Asking again with the same token replaces the earlier request.
+  db.prepare(
+    "INSERT OR REPLACE INTO logins (code, token_hash, label, created_at) VALUES (?, ?, ?, ?)",
+  )
+    .run(login.code, login.tokenHash, login.label, login.now.toISOString());
+}
+
+/** How many login requests are still waiting for approval. */
+export function countPendingLogins(db: Db, now: Date): number {
+  const row = db.prepare("SELECT COUNT(*) AS n FROM logins WHERE created_at >= ?").get(
+    new Date(now.getTime() - LOGIN_TTL_MS).toISOString(),
+  );
+  return Number(row?.["n"] ?? 0);
+}
+
+/** A login request still waiting for approval, or null. */
+export function findLogin(
+  db: Db,
+  code: string,
+  now: Date,
+): { label: string; createdAt: string } | null {
+  const row = db.prepare("SELECT label, created_at FROM logins WHERE code = ? AND created_at >= ?")
+    .get(code, new Date(now.getTime() - LOGIN_TTL_MS).toISOString());
+  return row === undefined
+    ? null
+    : { label: String(row["label"]), createdAt: String(row["created_at"]) };
+}
+
+/** Turns a waiting login into a token. False when there is no such request (or it expired). */
+export function approveLogin(db: Db, code: string, approvedBy: string, now: Date): boolean {
+  return inTransaction(db, () => {
+    const row = db.prepare(
+      "SELECT token_hash, label FROM logins WHERE code = ? AND created_at >= ?",
+    ).get(code, new Date(now.getTime() - LOGIN_TTL_MS).toISOString());
+    if (row === undefined) return false;
+    db.prepare("DELETE FROM logins WHERE code = ?").run(code);
+    db.prepare(
+      "INSERT INTO tokens (id, hash, label, approved_by, created_at) VALUES (?, ?, ?, ?, ?)",
+    ).run(
+      crypto.randomUUID(),
+      String(row["token_hash"]),
+      String(row["label"]),
+      approvedBy,
+      now.toISOString(),
+    );
+    return true;
+  });
+}
+
+/** The token with this hash, marked as used now, or null when there is none. */
+export function useToken(db: Db, hash: string, now: Date): TokenInfo | null {
+  const row = db.prepare("SELECT * FROM tokens WHERE hash = ?").get(hash);
+  if (row === undefined) return null;
+  db.prepare("UPDATE tokens SET last_used_at = ? WHERE hash = ?").run(now.toISOString(), hash);
+  return toTokenInfo(row);
+}
+
+/** Every token, newest first. */
+export function listTokens(db: Db): TokenInfo[] {
+  return db.prepare("SELECT * FROM tokens ORDER BY created_at DESC, id").all().map(toTokenInfo);
+}
+
+/** Revokes a token. False when there was none with that id. */
+export function deleteToken(db: Db, id: string): boolean {
+  return Number(db.prepare("DELETE FROM tokens WHERE id = ?").run(id).changes) > 0;
+}
+
+/**
+ * What export and import carry: everything but who may log in, and meta (the poller's heartbeat
+ * belongs to the process that wrote it).
+ */
+const DATA_TABLES = ["messages", "posts", "subscriptions", "roots"] as const;
+
+/** Thrown when an uploaded file is not a bridge database. */
+export class NotADatabase extends Error {}
+
+/**
+ * Loads a database file into memory. A live bridge.db (WAL mode) is refused: its latest writes may
+ * still be in the -wal file next to it, which an upload leaves behind, and nothing in the file says.
+ */
+function loadCopy(bytes: Uint8Array): Db {
+  const header = new TextDecoder().decode(bytes.subarray(0, 16));
+  if (header !== "SQLite format 3\0") throw new NotADatabase("That is not a sqlite file.");
+  if (bytes[18] === 2 || bytes[19] === 2) {
+    throw new NotADatabase(
+      "That is a live bridge.db, whose newest writes may be in its -wal file. " +
+        "Run devnull-bridge-server export next to it and import what it writes.",
+    );
+  }
+  const db = new DatabaseSync(":memory:");
+  try {
+    db.deserialize(bytes);
+    // Its views and triggers come from the upload: never run functions from them.
+    db.exec("PRAGMA trusted_schema = OFF");
+    db.prepare("SELECT count(*) FROM sqlite_master").get();
+  } catch (error) {
+    throw new NotADatabase(`That sqlite file cannot be read: ${(error as Error).message}`);
+  }
+  return db;
+}
+
+/** The threads, subscriptions and messages as a sqlite file, without tokens or pending logins. */
+export function exportData(db: Db): Uint8Array<ArrayBuffer> {
+  const copy = new DatabaseSync(":memory:");
+  copy.exec(SCHEMA);
+  inTransaction(copy, () => copyData(db, copy));
+  const bytes = new Uint8Array(copy.serialize());
+  copy.close();
+  return bytes;
+}
+
+/** Replaces the data tables of `to` with those of `from`; the rows read per table. */
+function copyData(from: Db, to: Db): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const table of DATA_TABLES) {
+    const columns = to.prepare(`PRAGMA table_info(${table})`).all().map((row) =>
+      `"${String(row["name"])}"`
+    );
+    const rows = from.prepare(`SELECT ${columns.join(", ")} FROM ${table}`).all();
+    to.exec(`DELETE FROM ${table}`);
+    const insert = to.prepare(
+      `INSERT INTO ${table} (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`,
+    );
+    for (const row of rows) insert.run(...Object.values(row) as (string | number | null)[]);
+    counts[table] = rows.length;
+  }
+  return counts;
+}
+
+/**
+ * Replaces the threads, subscriptions and messages with those in a sqlite file (an export, or the
+ * bridge.db of a single-machine bridge). Tokens stay. Returns the rows read per table.
+ */
+export function importData(db: Db, bytes: Uint8Array): Record<string, number> {
+  const source = loadCopy(bytes);
+  const tables = new Set(
+    source.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all()
+      .map((row) => String(row["name"])),
+  );
+  if (!tables.has("messages") || !tables.has("subscriptions")) {
+    throw new NotADatabase("That sqlite file is not a dev-null-bridge database.");
+  }
+  try {
+    // An older bridge's file: bring it up to this schema first.
+    source.exec(SCHEMA);
+    addMissingColumns(source, "posts", ["body TEXT", "html_url TEXT"]);
+    return inTransaction(db, () => copyData(source, db));
+  } catch (error) {
+    // A file whose tables do not fit (the transaction rolled back): say why, briefly.
+    const reason = (error as Error).message.split("\n")[0]!.slice(0, 200);
+    throw new NotADatabase(`That file does not fit this bridge's tables: ${reason}`);
+  } finally {
+    source.close();
+  }
 }

@@ -1,0 +1,9 @@
+.git
+agent
+test
+docs
+skills
+bin
+*.md
+.env*
+bridge.env

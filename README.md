@@ -1,12 +1,14 @@
 # dev-null-bridge
 
-Talk to your coding agents on [dev-null.sh](https://dev-null.sh), many sessions through one poller.
+Talk to your coding agents on [dev-null.sh](https://dev-null.sh), many sessions on many machines
+through one server.
 
-Every agent posts as the same account. A daemon polls your replies, stores them in a sqlite file,
-and each agent session follows its own threads through a small CLI, so sessions never see each
-other's conversations and none of them polls the site on its own.
+Every agent posts as the same bot account. A server on your VPS polls your replies, stores them in
+a sqlite file and posts for the agents with an SSH key it made itself, which never leaves it. Each machine
+logs in to it with its own token, and each agent session follows its own threads through a small
+CLI, so sessions never see each other's conversations and none of them polls the site on its own.
 
-![dev-null.sh feeds the poller, which writes bridge.db; each session long-polls bridge.db](docs/overview.svg)
+![dev-null.sh and the server exchange replies and posts; sessions on each machine reach the server over HTTPS with a token](docs/overview.svg)
 
 ## How it works
 
@@ -14,24 +16,23 @@ other's conversations and none of them polls the site on its own.
 sequenceDiagram
   participant H as Human
   participant D as dev-null.sh
-  participant P as Poller
-  participant S as SQLite DB
+  participant S as Server
   participant A as Agent CLI
   H->>D: commit, tag the bot account
   A->>S: watch (join thread)
   loop until the work is done
-    A->>S: long-poll (waits)
+    A->>S: long-poll (asks every 10 s)
     H->>D: reply
-    P->>D: poll replies
-    P->>S: store reply
+    S->>D: poll replies
     S-->>A: long-poll returns
-    A->>D: reply (agent answers)
+    A->>S: reply (text, images)
+    S->>D: post as the bot
   end
 ```
 
-- **Only your replies feed is read.** The poller fetches `/api/v1/users/<you>/commits?replies=1`
+- **Only your replies feed is read.** The server fetches `/api/v1/users/<you>/commits?replies=1`
   (the 20 newest) and re-checks the author of every commit, so a stranger's text can never reach an
-  agent. There is no backfill and no top-level feed.
+  agent. There is no top-level feed.
 - **A subscription is a set of commit ids.** `subscriptions(subscriber, commit_id)`. A subscriber
   receives a message when the message's id is in its set. The poller adds each new reply whose
   parent is in the set, and `reply` adds the commit it posts, so a thread is followed without ever
@@ -42,41 +43,111 @@ sequenceDiagram
 - **Stateless cursor.** `long-poll <name> --after <id>` blocks until something newer arrives, prints
   it, and prints the exact command to run next. The cursor is the only state (the same shape as
   `claw long-poll`).
-- **Posting runs dev-null.sh's own commit script**, which signs with an SSH key on the account's
-  GitHub. It is downloaded once from `/commit` into the cache after a sanity check, never piped
-  into a shell. Set `BRIDGE_COMMIT_SCRIPT` to use your own copy.
+- **Machines never hold the bot's key.** `reply` uploads the text and images to the server, which
+  runs dev-null.sh's own commit script with the key. The script is downloaded once from `/commit`
+  into the cache after a sanity check, never piped into a shell.
+- **Tokens are opaque and only their hash is stored.** `devnull-bridge login` makes a random token,
+  sends the server only its SHA-256, and waits while you approve the login in the browser. Revoke a
+  machine in the web UI. The CLI (`agent/`) imports nothing from the server (`src/`), and a test
+  keeps it that way.
 
-## Install
+## Run the server
 
-Needs [Deno](https://deno.com) 2.x and an SSH key whose public half is on the GitHub account the
-agents post as (an *authentication* key; dev-null.sh reads `github.com/<user>.keys`).
+On your VPS, with Docker:
+
+```sh
+docker build -t dev-null-bridge https://github.com/dtinth/dev-null-bridge.git
+docker run -d --name dev-null-bridge --restart unless-stopped \
+  -v dev-null-bridge:/data -p 8787:8787 --env-file bridge.env dev-null-bridge
+```
+
+Put it behind HTTPS (a reverse proxy, or your platform's) at the URL you set as
+`BRIDGE_PUBLIC_URL`. `GET /healthz` answers `ok`.
+
+You need:
+
+1. **A GitHub OAuth app** for the web UI: its callback URL is `<BRIDGE_PUBLIC_URL>/auth/callback`.
+   Only the people in `BRIDGE_AUTHORS` can log in. Without one the web UI is closed, and so is
+   approving logins.
+2. **A session secret**: 32 or more random characters (`openssl rand -hex 32`).
+
+[`.env.example`](.env.example) has them all: copy it to `bridge.env` and fill it in.
+
+On its first start the server makes the bot's SSH key (Ed25519, in `bot/.ssh/` next to the sqlite
+file, so on the volume). Open **Bot key** in the web UI, copy the public key, and add it to the bot
+account's GitHub as an *authentication* key (dev-null.sh checks signatures against
+`github.com/<bot>.keys`); the page says when GitHub lists it. To keep a key you already have, put
+it at `bot/.ssh/id_ed25519` on the volume before the first start (its `.pub` is derived).
+
+| Variable | Default | |
+|---|---|---|
+| `BRIDGE_PUBLIC_URL` | `http://localhost:<port>` | Where the server is reached; used in login links and the OAuth callback |
+| `BRIDGE_AUTHORS` | `dtinth` | Comma-separated usernames whose replies count and who may use the web UI |
+| `BRIDGE_BOT_USER` | `dtinth-bot` | The account agents post as |
+| `GITHUB_CLIENT_ID` | | The OAuth app, for the web UI |
+| `GITHUB_CLIENT_SECRET` | | |
+| `BRIDGE_SESSION_SECRET` | | Signs web sessions (required with the OAuth app) |
+| `BRIDGE_DB` | `/data/bridge.db` in Docker | The sqlite file; the bot's key is kept next to it |
+| `BRIDGE_INTERVAL` | `20` | Seconds between polls (at least 5) |
+| `BRIDGE_COMMIT_SCRIPT` | the cached `/commit` | Commit script to run instead of downloading one |
+| `PORT` | `8787` | Port to listen on |
+| `BRIDGE_HOSTNAME` | `0.0.0.0` | Address to listen on |
+| `DEVNULL_URL` | `https://dev-null.sh` | The site |
+
+Without Docker: `bin/devnull-bridge-server serve` with Deno 2.x, `curl` and `ssh-keygen`.
+
+### Web UI
+
+- **Subscriptions** (`/`): every subscriber, the threads it follows, and a page per thread.
+- **Bot key** (`/bot-key`): the public key to add to the bot's GitHub, and whether it is there.
+- **Data** (`/data`): export the threads, subscriptions, messages and posts as a sqlite file, or
+  import one in their place (tokens are never in it). Import takes an export, not a live
+  `bridge.db`.
+- **Tokens** (`/tokens`): each logged-in machine with its label and when it was last used; revoke
+  one to lock it out at once.
+- **Approve** (`/approve?code=…`): where `devnull-bridge login` sends you.
+
+Approve only a login you started yourself at a terminal, and check that the page's code matches
+that terminal's. The server is public, so anyone can make an approve link and send it to you; one
+you did not start gives them a token that posts as the bot.
+
+### Moving from a single-machine bridge
+
+Threads, subscriptions and messages carry over. On the old machine, stop its poller and export
+them with this checkout (it reads the same `~/.local/share/dev-null-bridge/bridge.db`):
+
+```sh
+pitchfork stop dev-null-bridge
+bin/devnull-bridge-server export bridge.db
+```
+
+Then import that file under **Data** in the server's web UI. It replaces the server's threads and
+messages; tokens and the bot key stay.
+
+The old bridge signed with a key in `~/.ssh`. Either add the server's new key to the bot's GitHub
+(Bot key), or keep the old one: copy it (the private key is enough) to `bot/.ssh/id_ed25519` on the
+volume, owned by the server's user with mode 600, before the first start.
+
+Then log the old machine in like any other, and point running sessions at the new CLI: their
+`long-poll` commands and subscriber names stay the same.
+
+## Set up a machine
+
+Needs [Deno](https://deno.com) 2.x. No SSH key.
 
 ```sh
 git clone https://github.com/dtinth/dev-null-bridge
 ln -s "$PWD/dev-null-bridge/bin/devnull-bridge" ~/.local/bin/devnull-bridge
+devnull-bridge login bridge.example.com       # prints a link; approve it in the browser
+devnull-bridge status
 ```
 
-Run the poller somewhere that stays up. With [pitchfork](https://pitchfork.jdx.dev), in your
-`config.toml`:
+The label defaults to the machine's hostname (`--label` to choose). The token is saved in
+`~/.config/devnull-bridge/config.json`, readable only by you; `BRIDGE_SERVER` and `BRIDGE_TOKEN`
+override it (for a container, say).
 
-```toml
-[daemons.dev-null-bridge]
-run = "/path/to/dev-null-bridge/bin/devnull-bridge poller"
-retry = true
-boot_start = true
-```
-
-Then `pitchfork start dev-null-bridge` and `devnull-bridge status`.
-
-The dashboard can run as a second daemon, on 127.0.0.1 only:
-
-```toml
-[daemons.dev-null-bridge-dashboard]
-run = "/path/to/dev-null-bridge/bin/devnull-bridge dashboard --port 8787"
-ready_port = 8787
-retry = true
-boot_start = true
-```
+`skills/dev-null-bridge/SKILL.md` teaches an agent the whole flow; link it into
+`~/.claude/skills/`.
 
 ## Use
 
@@ -86,36 +157,22 @@ devnull-bridge long-poll my-session --after <id>                         # in th
 devnull-bridge reply my-session <hash> "Done, pushed."                   # posts and follows
 devnull-bridge reply my-session <hash> --image shot.png "Screenshot"
 devnull-bridge reply my-session <hash> < body.txt                        # body from stdin
-devnull-bridge dashboard                                                  # http://127.0.0.1:8787
 ```
-
-`skills/dev-null-bridge/SKILL.md` teaches an agent the whole flow; link it into
-`~/.claude/skills/`.
 
 | Command | |
 |---|---|
+| `login <server> [--label text]` | Log this machine in; you approve it in the browser |
+| `logout` | Forget this machine's token (revoke it in the web UI too) |
 | `watch <name> <commit>` | Follow a thread; prints the commit and the replies so far |
 | `unwatch <name> <commit>` | Stop following it (and what is under it) |
 | `read <name> [--after id]` | Print what `<name>` has received, once |
-| `long-poll <name> --after id [--interval s] [--timeout s]` | Block for the next message |
+| `long-poll <name> --after id [--interval s] [--timeout s]` | Block for the next message (asks every 10 s) |
 | `reply <name> <commit> [--image path]... [text]` | Post as the bot and follow the new commit; with no text, the body is read from stdin |
 | `list [name]` | The threads each subscriber follows |
-| `status` | Whether the poller is running |
-| `poller` | Run the poller |
-| `dashboard [--port 8787]` | A read-only page on 127.0.0.1 listing every subscription, with a page per thread |
-| `backfill` | Fetch the text of agent posts recorded before `reply` kept it |
+| `status` | Who the bridge listens to and posts as, the server, and whether its poller is running |
 
-## Config
-
-| Variable | Default | |
-|---|---|---|
-| `BRIDGE_DB` | `~/.local/share/dev-null-bridge/bridge.db` | The shared sqlite file |
-| `BRIDGE_AUTHORS` | `dtinth` | Comma-separated usernames whose replies count |
-| `BRIDGE_BOT_USER` | `dtinth-bot` | The account agents post as (used to find commits by hash) |
-| `BRIDGE_INTERVAL` | `20` | Seconds between polls (at least 5) |
-| `BRIDGE_COMMIT_SCRIPT` | the cached `/commit` | Commit script to run instead of downloading one |
-| `BRIDGE_DASHBOARD_PORT` | `8787` | Dashboard port |
-| `DEVNULL_URL` | `https://dev-null.sh` | The site |
+The server has commands of its own: `serve`, `backfill` (fetch the text of agent posts recorded
+before `reply` kept it), and `export <file>` (the same file as the Data page's export).
 
 ## Limits
 
@@ -129,8 +186,10 @@ devnull-bridge dashboard                                                  # http
 
 ```sh
 deno task ci      # fmt, lint, type-check, tests
+deno task server  # the server, from a checkout
 ```
 
-Every external effect (network, clock, subprocesses, the database, the HTTP server) goes through
-`Runtime` (`src/runtime.ts`), which the tests replace with `src/fake_runtime.ts`, the way claw's
-agent CLI does.
+Every external effect (network, clock, subprocesses, the database, the HTTP server) goes through a
+`Runtime`: `src/runtime.ts` for the server and `agent/runtime.ts` for the CLI, which the tests
+replace with fakes, the way claw's agent CLI does. `test/` runs the CLI against the server's real
+handler in one process.
