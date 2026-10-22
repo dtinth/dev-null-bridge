@@ -20,7 +20,9 @@ async function runCommand(
   try {
     const { code, stdout, stderr } = await new Deno.Command(cmd, {
       args,
-      env: extraEnv ?? {},
+      // Only what the commit script needs: never the server's secrets.
+      clearEnv: true,
+      env: { HOME: home, PATH: env["PATH"] ?? "/usr/bin:/bin", ...extraEnv },
       stdin: "null",
       stdout: "piped",
       stderr: "piped",

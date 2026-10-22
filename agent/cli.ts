@@ -359,7 +359,7 @@ async function longPoll(rt: Runtime, args: string[]): Promise<number> {
 }
 
 const REPLY_USAGE = `usage: ${CLI_NAME} reply <name> <commit> [--image path]... [text]
-  (with no text, the body is read from stdin)`;
+  (with no text, the body is read from stdin; a reply always needs text)`;
 
 async function reply(rt: Runtime, args: string[]): Promise<number> {
   const parsed = parseArgs(args, ["image"]);
@@ -371,7 +371,7 @@ async function reply(rt: Runtime, args: string[]): Promise<number> {
   const text = parsed.positionals.length > 2
     ? parsed.positionals.slice(2).join(" ")
     : (await rt.readStdin() ?? "").replace(/\n+$/, "");
-  if (text.trim() === "" && images.length === 0) throw new UsageError(REPLY_USAGE);
+  if (text.trim() === "") throw new UsageError(REPLY_USAGE);
 
   const form = new FormData();
   form.set("name", name);

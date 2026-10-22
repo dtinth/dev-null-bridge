@@ -44,7 +44,9 @@ export function renderApprove(
       escapeHtml(pending.createdAt)
     }. Check that its terminal shows this code:</p>
     <p class="code">${escapeHtml(code)}</p>
-    <p class="meta">Its agents will be able to read the threads they watch and post as the bot.</p>
+    <p class="meta">Its agents will be able to read the threads they watch and post as the bot.
+    Only approve a login you started yourself just now: if someone else sent you this link, they get
+    the token.</p>
     <form method="post" action="/approve">
       <input type="hidden" name="code" value="${escapeHtml(code)}">
       <button class="primary">Approve</button>

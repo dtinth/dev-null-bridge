@@ -131,6 +131,32 @@ Deno.test("login: asking again with the same token replaces the earlier request"
   assertEquals((await start()).status, 200);
 });
 
+Deno.test("login: an anonymous request cannot be huge, and only so many may wait at once", async () => {
+  const { handler } = setup();
+  const start = (body: string) =>
+    handler(new Request(`${SERVER}/api/logins`, { method: "POST", body }));
+
+  const huge = await start(
+    JSON.stringify({ label: "x".repeat(20_000), token_hash: "c".repeat(64) }),
+  );
+  assertEquals(huge.status, 413);
+
+  const hash = (n: number) => n.toString(16).padStart(64, "0");
+  for (let n = 0; n < 50; n++) {
+    assertEquals((await start(JSON.stringify({ label: "x", token_hash: hash(n) }))).status, 200);
+  }
+  const more = await start(JSON.stringify({ label: "x", token_hash: hash(50) }));
+  assertEquals(more.status, 429);
+});
+
+Deno.test("web pages refuse to be framed by another site", async () => {
+  const { server, handler } = setup();
+  const cookie = await sessionCookie("dtinth", server.now());
+  const page = await handler(new Request(`${SERVER}/tokens`, { headers: { cookie } }));
+  assertEquals(page.headers.get("x-frame-options"), "DENY");
+  assertStringIncludes(page.headers.get("content-security-policy")!, "frame-ancestors 'none'");
+});
+
 Deno.test("logout forgets the token here; revoking it on the server locks the machine out", async () => {
   const h = await harness();
   h.agent.env = { HOME: "/home/me" };
@@ -254,7 +280,15 @@ Deno.test("a callback without the matching state is refused", async () => {
 Deno.test("a login never redirects off the server", async () => {
   const server = githubAnswering("dtinth");
   const handler = createServer(server, server.openDb(), serverConfig());
-  for (const next of ["//evil.example", "https://evil.example", "evil"]) {
+  for (
+    const next of [
+      "//evil.example",
+      "https://evil.example",
+      "evil",
+      "/\\evil.example",
+      "/\t/evil.example",
+    ]
+  ) {
     assertEquals((await callback(handler, next)).headers.get("location"), "/");
   }
 });

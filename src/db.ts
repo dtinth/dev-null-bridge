@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS logins (
   label TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS logins_created ON logins (created_at);
 CREATE VIEW IF NOT EXISTS edges AS
   SELECT id, parent_id FROM messages WHERE parent_id IS NOT NULL
   UNION
@@ -387,6 +388,14 @@ export function startLogin(
     "INSERT OR REPLACE INTO logins (code, token_hash, label, created_at) VALUES (?, ?, ?, ?)",
   )
     .run(login.code, login.tokenHash, login.label, login.now.toISOString());
+}
+
+/** How many login requests are still waiting for approval. */
+export function countPendingLogins(db: Db, now: Date): number {
+  const row = db.prepare("SELECT COUNT(*) AS n FROM logins WHERE created_at >= ?").get(
+    new Date(now.getTime() - LOGIN_TTL_MS).toISOString(),
+  );
+  return Number(row?.["n"] ?? 0);
 }
 
 /** A login request still waiting for approval, or null. */

@@ -213,6 +213,28 @@ Deno.test("reply with no text anywhere is a usage error", async () => {
   assertEquals(h.server.commands, []);
 });
 
+Deno.test("a reply always needs text, even with an image", async () => {
+  const h = await harness();
+  h.agent.binaries.set("a.png", new Uint8Array([1]));
+  assertEquals(await h.run("reply", "x", ROOT, "--image", "a.png"), 2);
+  assertEquals(h.server.commands, []);
+});
+
+Deno.test("a commit the server cannot make sense of is the caller's error, not the server's", async () => {
+  const h = await harness();
+  assertEquals(await h.run("watch", "x", "nope"), 1);
+  assertStringIncludes(h.agent.err.join(""), "is not a commit");
+  const response = await h.handler(
+    new Request("https://bridge.example/api/watch", {
+      method: "POST",
+      body: JSON.stringify({ name: "x", commit: "nope" }),
+      headers: { authorization: "Bearer dnb_test-token" },
+    }),
+  );
+  assertEquals(response.status, 400);
+  assertEquals(h.server.err.join(""), "");
+});
+
 Deno.test("reply refuses files that are not images, before uploading", async () => {
   const h = await harness();
   assertEquals(await h.run("reply", "x", ROOT, "--image", "notes.txt", "hi"), 2);

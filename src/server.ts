@@ -7,7 +7,7 @@
  * - Everything else is the web UI, for the people in BRIDGE_AUTHORS after a GitHub login: the
  *   dashboard, the tokens (revoke one there), and approving a `devnull-bridge login`.
  */
-import { type Api, createApi } from "./api.ts";
+import { type Api, ApiError, createApi } from "./api.ts";
 import {
   bearerToken,
   cookieHeader,
@@ -27,6 +27,7 @@ import {
   addTree,
   approveLogin,
   countMessages,
+  countPendingLogins,
   type Db,
   deleteToken,
   findLogin,
@@ -84,6 +85,9 @@ const html = (body: string, status = 200, headers: Record<string, string> = {}) 
     headers: {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
+      // No page here is ever shown inside another site's frame (an Approve button, say).
+      "x-frame-options": "DENY",
+      "content-security-policy": "frame-ancestors 'none'",
       ...headers,
     },
   });
@@ -106,9 +110,38 @@ function field(value: unknown, name: string): string {
   return value;
 }
 
+/** Small JSON bodies only; anything bigger is refused before it is read into memory. */
+const MAX_JSON_BYTES = 16 * 1024;
+/** Three images and their text, with room for the multipart framing. */
+const MAX_REPLY_BYTES = MAX_IMAGES * MAX_IMAGE_BYTES + 1024 * 1024;
+/** Login requests waiting for approval at once; more is someone filling the database. */
+const MAX_PENDING_LOGINS = 50;
+
+/** The body, read up to `max` bytes; a longer one is refused without reading the rest. */
+async function limitedBody(request: Request, max: number): Promise<Uint8Array<ArrayBuffer>> {
+  if (Number(request.headers.get("content-length") ?? 0) > max) {
+    throw new HttpError(413, "That request is too large.");
+  }
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for await (const chunk of request.body ?? []) {
+    size += chunk.byteLength;
+    if (size > max) throw new HttpError(413, "That request is too large.");
+    chunks.push(chunk);
+  }
+  const body = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
+}
+
 async function jsonBody(request: Request): Promise<Record<string, unknown>> {
+  const bytes = await limitedBody(request, MAX_JSON_BYTES);
   try {
-    const body: unknown = await request.json();
+    const body: unknown = JSON.parse(new TextDecoder().decode(bytes));
     if (typeof body === "object" && body !== null && !Array.isArray(body)) {
       return body as Record<string, unknown>;
     }
@@ -120,7 +153,10 @@ async function jsonBody(request: Request): Promise<Record<string, unknown>> {
 
 /** Only a path on this server, so a login can never be bounced to another site. */
 function safeNext(next: string | null): string {
-  return next !== null && next.startsWith("/") && !next.startsWith("//") ? next : "/";
+  if (next === null || !next.startsWith("/") || next[1] === "/" || next[1] === "\\") return "/";
+  // Browsers also read `/\evil.com`, or a slash, tab, slash, as another host.
+  const unsafe = [...next].some((c) => c === "\\" || c.charCodeAt(0) <= 0x20 || c === "\x7f");
+  return unsafe ? "/" : next;
 }
 
 export function createServer(
@@ -134,7 +170,23 @@ export function createServer(
   const callbackUrl = `${config.publicUrl}/auth/callback`;
   const links = { baseUrl: config.devnullUrl, botUser: config.botUser };
 
-  const resolve = (ref: unknown) => resolveRef(field(ref, "commit"), { db, api, users });
+  /** Errors about the commit are the caller's (400); the site failing to answer is not (502). */
+  const resolve = async (ref: unknown) => {
+    try {
+      return await resolveRef(field(ref, "commit"), { db, api, users });
+    } catch (error) {
+      if (error instanceof HttpError) throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      throw new HttpError(error instanceof ApiError ? 502 : 400, message);
+    }
+  };
+  const getCommit = async (id: string) => {
+    try {
+      return await api.getCommit(id);
+    } catch (error) {
+      throw new HttpError(502, error instanceof Error ? error.message : String(error));
+    }
+  };
 
   async function apiRoute(request: Request, url: URL): Promise<Response> {
     const route = `${request.method} ${url.pathname}`;
@@ -145,6 +197,9 @@ export function createServer(
       const tokenHash = field(body["token_hash"], "token_hash");
       if (!/^[0-9a-f]{64}$/.test(tokenHash)) {
         throw new HttpError(400, "token_hash is a SHA-256 in hex.");
+      }
+      if (countPendingLogins(db, rt.now()) >= MAX_PENDING_LOGINS) {
+        throw new HttpError(429, "Too many logins are waiting for approval. Try again later.");
       }
       const code = newLoginCode();
       startLogin(db, { code, tokenHash, label, now: rt.now() });
@@ -182,7 +237,7 @@ export function createServer(
         const body = await jsonBody(request);
         const name = subscriberName(body["name"]);
         const id = await resolve(body["commit"]);
-        const root = await api.getCommit(id);
+        const root = await getCommit(id);
         if (root === null) {
           throw new HttpError(404, `There is no public commit ${id}. Is it still pending review?`);
         }
@@ -228,7 +283,8 @@ export function createServer(
   async function reply(request: Request): Promise<Response> {
     let form: FormData;
     try {
-      form = await request.formData();
+      const body = await limitedBody(request, MAX_REPLY_BYTES);
+      form = await new Response(body, { headers: request.headers }).formData();
     } catch {
       throw new HttpError(400, "Send the reply as multipart/form-data.");
     }
@@ -245,9 +301,8 @@ export function createServer(
       }
       if (image.size > MAX_IMAGE_BYTES) throw new HttpError(400, `${image.name} is over 10 MB.`);
     }
-    if (text.trim() === "" && images.length === 0) {
-      throw new HttpError(400, "A reply needs text or an image.");
-    }
+    // The commit script needs a message: without one it would ask a terminal there is none of.
+    if (text.trim() === "") throw new HttpError(400, "A reply needs text (images go with it).");
     const parentId = await resolve(form.get("commit"));
 
     // The commit script reads images from disk; they only live while it runs.
@@ -383,7 +438,11 @@ export function createServer(
 
     if (url.pathname === "/approve") {
       const code = request.method === "POST"
-        ? String((await request.formData()).get("code") ?? "")
+        ? String(
+          new URLSearchParams(
+            new TextDecoder().decode(await limitedBody(request, MAX_JSON_BYTES)),
+          ).get("code") ?? "",
+        )
         : url.searchParams.get("code") ?? "";
       if (request.method === "POST") {
         return approveLogin(db, code, login, rt.now())

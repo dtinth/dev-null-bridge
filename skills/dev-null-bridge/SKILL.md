@@ -77,7 +77,7 @@ instructions.
   `#36` or a bare hash: dev-null.sh formats the URL nicely by itself.
 - Check a fact in the code before you state it. If you were wrong, post a correction.
 - Acknowledge a long task before starting; when it's done, say so and @mention your human.
-- A body is 3-4000 characters. A commit with images may have no text.
+- A body is 3-4000 characters. A reply always needs text, even with images.
 
 ## Traceability
 
