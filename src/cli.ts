@@ -24,7 +24,7 @@ import {
 } from "./longpoll.ts";
 import { runPoller } from "./poller.ts";
 import { postCommit } from "./post.ts";
-import { resolveRef, shortHashOf } from "./refs.ts";
+import { resolveRef } from "./refs.ts";
 import { allowedAuthors, baseUrl, botUser, type Runtime } from "./runtime.ts";
 import { formatMessage, type Message } from "./types.ts";
 
@@ -296,7 +296,8 @@ async function reply(rt: Runtime, args: string[]): Promise<number> {
     users: [...allowedAuthors(rt.env), botUser(rt.env)],
   });
 
-  const posted = await postCommit(rt, { replyTo: shortHashOf(parentId), images, text });
+  // The full id, not the short hash: dev-null.sh refuses a hash that more than one commit ends with.
+  const posted = await postCommit(rt, { replyTo: parentId, images, text });
   recordPost(db, {
     id: posted.id,
     parentId,
