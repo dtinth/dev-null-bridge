@@ -1,7 +1,9 @@
 /**
- * Posting goes through dev-null.sh's own commit script, which signs with an SSH key from the
- * agent or ~/.ssh and never touches the private key. The bridge never reimplements the signing.
+ * Posting goes through dev-null.sh's own commit script, which signs with the key in ~/.ssh and
+ * never reads the private key itself; it runs with the bot's home, where the server made the key.
+ * The bridge never reimplements the signing.
  */
+import { botHome } from "./botkey.ts";
 import { baseUrl, type Runtime } from "./runtime.ts";
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
@@ -58,7 +60,10 @@ export async function postCommit(rt: Runtime, options: PostOptions): Promise<Pos
     options.text,
   ];
 
-  const result = await rt.runCommand("bash", args, { DEVNULL_URL: baseUrl(rt.env) });
+  const result = await rt.runCommand("bash", args, {
+    DEVNULL_URL: baseUrl(rt.env),
+    HOME: botHome(rt),
+  });
   if (result.code !== 0) {
     throw new Error(
       (result.stderr || result.stdout).trim() || `The commit script failed (${result.code}).`,

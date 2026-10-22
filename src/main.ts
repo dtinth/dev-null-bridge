@@ -7,9 +7,12 @@ import type { CommandResult, Runtime } from "./runtime.ts";
 
 const env = Deno.env.toObject();
 const home = env["HOME"] ?? "";
+const dbPath = env["BRIDGE_DB"] ??
+  `${env["XDG_DATA_HOME"] ?? `${home}/.local/share`}/dev-null-bridge/bridge.db`;
 
 function dirname(path: string): string {
-  return path.slice(0, path.lastIndexOf("/")) || "/";
+  const slash = path.lastIndexOf("/");
+  return slash === -1 ? "." : path.slice(0, slash) || "/";
 }
 
 async function runCommand(
@@ -52,11 +55,10 @@ const runtime: Runtime = {
   runCommand,
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   openDb() {
-    const path = env["BRIDGE_DB"] ??
-      `${env["XDG_DATA_HOME"] ?? `${home}/.local/share`}/dev-null-bridge/bridge.db`;
-    Deno.mkdirSync(dirname(path), { recursive: true });
-    return openDbAt(path);
+    Deno.mkdirSync(dirname(dbPath), { recursive: true });
+    return openDbAt(dbPath);
   },
+  dataDir: () => dirname(dbPath),
   serve: (port, hostname, handler) =>
     Deno.serve({ hostname, port, onListen: () => {} }, handler).finished,
   cacheDir: () => `${env["XDG_CACHE_HOME"] ?? `${home}/.cache`}/dev-null-bridge`,
@@ -71,6 +73,10 @@ const runtime: Runtime = {
   async writeTextFile(path, content) {
     await Deno.mkdir(dirname(path), { recursive: true });
     await Deno.writeTextFile(path, content, { mode: 0o600 });
+  },
+  async makePrivateDir(path) {
+    await Deno.mkdir(path, { recursive: true, mode: 0o700 });
+    await Deno.chmod(path, 0o700);
   },
   makeTempDir: () => Deno.makeTempDir({ prefix: "devnull-bridge-" }),
   writeFile: (path, content) => Deno.writeFile(path, content, { mode: 0o600 }),

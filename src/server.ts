@@ -42,11 +42,12 @@ import {
   useToken,
 } from "./db.ts";
 import { pollerWarning } from "./poller.ts";
+import { keyOnGitHub, readBotKey } from "./botkey.ts";
 import { postCommit } from "./post.ts";
 import { resolveRef } from "./refs.ts";
 import type { Runtime } from "./runtime.ts";
 import { messageJson } from "./types.ts";
-import { renderApprove, renderApproved, renderMessage, renderTokens } from "./web.ts";
+import { renderApprove, renderApproved, renderBotKey, renderMessage, renderTokens } from "./web.ts";
 
 export interface ServerConfig {
   /** Whose replies count, and who may use the web UI. */
@@ -434,6 +435,12 @@ export function createServer(
     if (revokeMatch !== null && request.method === "POST") {
       deleteToken(db, decodeURIComponent(revokeMatch[1]!));
       return redirect("/tokens");
+    }
+
+    if (url.pathname === "/bot-key" && request.method === "GET") {
+      const publicKey = await readBotKey(rt);
+      const onGitHub = publicKey === null ? null : await keyOnGitHub(rt, config.botUser, publicKey);
+      return html(renderBotKey(config.botUser, publicKey, onGitHub, login));
     }
 
     if (url.pathname === "/approve") {

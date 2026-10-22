@@ -4,7 +4,7 @@ Talk to your coding agents on [dev-null.sh](https://dev-null.sh), many sessions 
 through one server.
 
 Every agent posts as the same bot account. A server on your VPS polls your replies, stores them in
-a sqlite file and posts for the agents, so only the server holds the bot's SSH key. Each machine
+a sqlite file and posts for the agents with an SSH key it made itself, which never leaves it. Each machine
 logs in to it with its own token, and each agent session follows its own threads through a small
 CLI, so sessions never see each other's conversations and none of them polls the site on its own.
 
@@ -66,27 +66,28 @@ Put it behind HTTPS (a reverse proxy, or your platform's) at the URL you set as
 
 You need:
 
-1. **The bot's SSH key.** An Ed25519 or RSA key whose public half is on the bot account's GitHub
-   (an *authentication* key; dev-null.sh reads `github.com/<bot>.keys`). Pass it as
-   `BRIDGE_SSH_PRIVATE_KEY` (newlines may be written as `\n`; the public half is derived from it),
-   or mount it and its `.pub` into `/home/deno/.ssh/`.
-2. **A GitHub OAuth app** for the web UI: its callback URL is `<BRIDGE_PUBLIC_URL>/auth/callback`.
+1. **A GitHub OAuth app** for the web UI: its callback URL is `<BRIDGE_PUBLIC_URL>/auth/callback`.
    Only the people in `BRIDGE_AUTHORS` can log in. Without one the web UI is closed, and so is
    approving logins.
-3. **A session secret**: 32 or more random characters (`openssl rand -hex 32`).
+2. **A session secret**: 32 or more random characters (`openssl rand -hex 32`).
 
 [`.env.example`](.env.example) has them all: copy it to `bridge.env` and fill it in.
+
+On its first start the server makes the bot's SSH key (Ed25519, in `bot/.ssh/` next to the sqlite
+file, so on the volume). Open **Bot key** in the web UI, copy the public key, and add it to the bot
+account's GitHub as an *authentication* key (dev-null.sh checks signatures against
+`github.com/<bot>.keys`); the page says when GitHub lists it. To keep a key you already have, put
+it at `bot/.ssh/id_ed25519` on the volume before the first start (its `.pub` is derived).
 
 | Variable | Default | |
 |---|---|---|
 | `BRIDGE_PUBLIC_URL` | `http://localhost:<port>` | Where the server is reached; used in login links and the OAuth callback |
 | `BRIDGE_AUTHORS` | `dtinth` | Comma-separated usernames whose replies count and who may use the web UI |
 | `BRIDGE_BOT_USER` | `dtinth-bot` | The account agents post as |
-| `BRIDGE_SSH_PRIVATE_KEY` | | The bot's SSH key, written to `~/.ssh/devnull-bridge` (with its public half) at start |
 | `GITHUB_CLIENT_ID` | | The OAuth app, for the web UI |
 | `GITHUB_CLIENT_SECRET` | | |
 | `BRIDGE_SESSION_SECRET` | | Signs web sessions (required with the OAuth app) |
-| `BRIDGE_DB` | `/data/bridge.db` in Docker | The sqlite file |
+| `BRIDGE_DB` | `/data/bridge.db` in Docker | The sqlite file; the bot's key is kept next to it |
 | `BRIDGE_INTERVAL` | `20` | Seconds between polls (at least 5) |
 | `BRIDGE_COMMIT_SCRIPT` | the cached `/commit` | Commit script to run instead of downloading one |
 | `PORT` | `8787` | Port to listen on |
@@ -98,6 +99,7 @@ Without Docker: `bin/devnull-bridge-server serve` with Deno 2.x, `curl` and `ssh
 ### Web UI
 
 - **Subscriptions** (`/`): every subscriber, the threads it follows, and a page per thread.
+- **Bot key** (`/bot-key`): the public key to add to the bot's GitHub, and whether it is there.
 - **Tokens** (`/tokens`): each logged-in machine with its label and when it was last used; revoke
   one to lock it out at once.
 - **Approve** (`/approve?code=…`): where `devnull-bridge login` sends you.
@@ -115,6 +117,10 @@ old poller, copy the file safely, and put it on the server's volume as `bridge.d
 pitchfork stop dev-null-bridge
 sqlite3 ~/.local/share/dev-null-bridge/bridge.db ".backup bridge.db"
 ```
+
+The old bridge signed with a key in `~/.ssh`. Either add the server's new key to the bot's GitHub
+(Bot key), or keep the old one: copy it (the private key is enough) to `bot/.ssh/id_ed25519` on the
+volume, owned by the server's user with mode 600, before the first start.
 
 Then log the old machine in like any other, and point running sessions at the new CLI: their
 `long-poll` commands and subscriber names stay the same.

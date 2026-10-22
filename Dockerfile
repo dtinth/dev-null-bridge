@@ -12,9 +12,9 @@ COPY deno.json deno.lock ./
 COPY src ./src
 RUN deno cache src/main.ts
 
-# The sqlite file and the cached commit script live on the volume; the SSH key goes in ~/.ssh
-# (mount it with its .pub, or pass BRIDGE_SSH_PRIVATE_KEY).
-RUN mkdir -p /data /home/deno/.ssh && chown -R deno:deno /data /home/deno && chmod 700 /home/deno/.ssh
+# The sqlite file, the bot's SSH key (made on first start, in /data/bot/.ssh) and the cached commit
+# script all live on the volume.
+RUN mkdir -p /data /home/deno && chown -R deno:deno /data /home/deno
 ENV BRIDGE_DB=/data/bridge.db XDG_CACHE_HOME=/data/cache HOME=/home/deno PORT=8787
 VOLUME /data
 USER deno

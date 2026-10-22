@@ -163,6 +163,8 @@ Deno.test("reply posts through the server's commit script, follows the new commi
 
   const posted = h.server.commands.at(-1)!;
   assertEquals(posted.cmd, "bash");
+  // The commit script signs with the key the server made, in the bot's own home.
+  assertEquals(posted.env?.HOME, "/data/bot");
   assertEquals(posted.args.slice(1), [
     "--reply",
     ROOT,

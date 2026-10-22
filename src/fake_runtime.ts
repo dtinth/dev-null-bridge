@@ -24,10 +24,14 @@ export interface FakeOptions {
   routes?: Record<string, unknown>;
   /** Text bodies by URL. */
   texts?: Record<string, string>;
+  /** Answers for subprocesses; by default they succeed, and ssh-keygen -f makes a key. */
   command?: (cmd: string, args: string[]) => CommandResult;
   /** Answers for any other request (a POST, a header check), after routes and texts. */
   handle?: (request: Request) => Response | undefined;
 }
+
+/** The public key the fake ssh-keygen makes, without its comment. */
+export const FAKE_PUBLIC_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeKey";
 
 export function fakeRuntime(options: FakeOptions = {}): FakeRuntime {
   const db = openDbAt(":memory:");
@@ -65,9 +69,13 @@ export function fakeRuntime(options: FakeOptions = {}): FakeRuntime {
     stderr: (text) => void err.push(text),
     runCommand(cmd, args, env) {
       this.commands.push({ cmd, args, env });
-      return Promise.resolve(
-        options.command?.(cmd, args) ?? { code: 0, stdout: "", stderr: "" },
-      );
+      if (options.command !== undefined) return Promise.resolve(options.command(cmd, args));
+      const keyPath = args[args.indexOf("-f") + 1];
+      if (cmd === "ssh-keygen" && keyPath !== undefined) {
+        files.set(keyPath, "PRIVATE KEY");
+        files.set(`${keyPath}.pub`, `${FAKE_PUBLIC_KEY} ${args[args.indexOf("-C") + 1]}\n`);
+      }
+      return Promise.resolve({ code: 0, stdout: "", stderr: "" });
     },
     sleep: (ms) => {
       clock.time += ms;
@@ -79,11 +87,13 @@ export function fakeRuntime(options: FakeOptions = {}): FakeRuntime {
       return Promise.resolve();
     },
     cacheDir: () => "/cache",
+    dataDir: () => "/data",
     readTextFile: (path) => Promise.resolve(files.get(path) ?? null),
     writeTextFile: (path, content) => {
       files.set(path, content);
       return Promise.resolve();
     },
+    makePrivateDir: () => Promise.resolve(),
     makeTempDir: () => Promise.resolve(`/tmp/upload-${++temps}`),
     writeFile: (path, content) => {
       binaries.set(path, content);

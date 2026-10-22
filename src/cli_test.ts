@@ -1,7 +1,7 @@
 import { assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
 import { runCli, serverConfig } from "./cli.ts";
 import { readTree, recordPost } from "./db.ts";
-import { commitJson, fakeRuntime } from "./fake_runtime.ts";
+import { commitJson, FAKE_PUBLIC_KEY, fakeRuntime } from "./fake_runtime.ts";
 import { uuid } from "./test_util.ts";
 
 const API = "https://dev-null.sh/api/v1/commits";
@@ -26,37 +26,56 @@ Deno.test("serve runs the poller and the server on PORT, on every address by def
   assertEquals(await health.text(), "ok");
 });
 
-Deno.test("serve writes an SSH key from the environment, and its public half, where the commit script looks", async () => {
-  const rt = fakeRuntime({
-    env: {
-      HOME: "/home/deno",
-      BRIDGE_SSH_PRIVATE_KEY:
-        "-----BEGIN OPENSSH PRIVATE KEY-----\\nabc\\n-----END OPENSSH PRIVATE KEY-----",
-    },
-    command: (cmd) =>
-      cmd === "ssh-keygen"
-        ? { code: 0, stdout: "ssh-ed25519 AAAA bot\n", stderr: "" }
-        : { code: 1, stdout: "", stderr: "" },
-  });
+Deno.test("serve makes the bot's SSH key on first start, next to the database, and keeps it", async () => {
+  const rt = fakeRuntime();
   rt.sleep = () => Promise.reject(new Error("stop"));
 
   await runCli(["serve"], rt);
 
-  assertEquals(
-    rt.files.get("/home/deno/.ssh/devnull-bridge"),
-    "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----\n",
-  );
   assertEquals(rt.commands[0]?.cmd, "ssh-keygen");
-  assertEquals(rt.commands[0]?.args, ["-y", "-f", "/home/deno/.ssh/devnull-bridge"]);
-  assertEquals(rt.files.get("/home/deno/.ssh/devnull-bridge.pub"), "ssh-ed25519 AAAA bot\n");
+  assertEquals(rt.commands[0]?.args, [
+    "-q",
+    "-t",
+    "ed25519",
+    "-N",
+    "",
+    "-C",
+    "dtinth-bot@dev-null-bridge",
+    "-f",
+    "/data/bot/.ssh/id_ed25519",
+  ]);
+  assertStringIncludes(rt.err.join(""), `posting as @dtinth-bot with ${FAKE_PUBLIC_KEY}`);
 
-  const bad = fakeRuntime({
-    env: { BRIDGE_SSH_PRIVATE_KEY: "not a key" },
-    command: () => ({ code: 255, stdout: "", stderr: "invalid format" }),
+  await runCli(["serve"], rt);
+  assertEquals(rt.commands.filter((c) => c.cmd === "ssh-keygen").length, 1);
+
+  const broken = fakeRuntime({ command: () => ({ code: 1, stdout: "", stderr: "no space" }) });
+  assertEquals(await runCli(["serve"], broken), 1);
+  assertStringIncludes(broken.err.join(""), "no space");
+  assertEquals(broken.served, []);
+});
+
+Deno.test("a key put there without its .pub gets one derived, and the old env key is not read", async () => {
+  const rt = fakeRuntime({
+    env: { BRIDGE_SSH_PRIVATE_KEY: "old" },
+    command: () => ({ code: 0, stdout: "ssh-ed25519 AAAAold bot\n", stderr: "" }),
   });
-  assertEquals(await runCli(["serve"], bad), 2);
-  assertStringIncludes(bad.err.join(""), "invalid format");
-  assertEquals(bad.served, []);
+  rt.files.set("/data/bot/.ssh/id_ed25519", "PRIVATE KEY");
+  rt.files.set("/data/bot/.ssh/id_ed25519.pub", "");
+  rt.sleep = () => Promise.reject(new Error("stop"));
+
+  await runCli(["serve"], rt);
+
+  assertEquals(rt.commands[0]?.args, ["-y", "-f", "/data/bot/.ssh/id_ed25519"]);
+  assertEquals(rt.files.get("/data/bot/.ssh/id_ed25519.pub"), "ssh-ed25519 AAAAold bot\n");
+  assertStringIncludes(rt.err.join(""), "BRIDGE_SSH_PRIVATE_KEY is no longer read");
+
+  const unreadable = fakeRuntime({
+    command: () => ({ code: 1, stdout: "", stderr: "invalid format" }),
+  });
+  unreadable.files.set("/data/bot/.ssh/id_ed25519", "garbage");
+  assertEquals(await runCli(["serve"], unreadable), 1);
+  assertStringIncludes(unreadable.err.join(""), "invalid format");
 });
 
 Deno.test("the server's config needs both halves of the OAuth app and a long session secret", () => {

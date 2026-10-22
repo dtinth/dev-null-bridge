@@ -21,6 +21,8 @@ export interface Runtime {
   openDb(): Db;
   /** Directory for things the bridge downloads, such as the commit script. */
   cacheDir(): string;
+  /** Directory the sqlite file is in; the bot's SSH key is kept there too. */
+  dataDir(): string;
   /** Serve HTTP until the process is stopped. */
   serve(
     port: number,
@@ -29,6 +31,8 @@ export interface Runtime {
   ): Promise<void>;
   readTextFile(path: string): Promise<string | null>;
   writeTextFile(path: string, content: string): Promise<void>;
+  /** Make a directory (and its parents) that only the owner can open. */
+  makePrivateDir(path: string): Promise<void>;
   /** A new private directory for files that only live while one request is handled. */
   makeTempDir(): Promise<string>;
   writeFile(path: string, content: Uint8Array): Promise<void>;

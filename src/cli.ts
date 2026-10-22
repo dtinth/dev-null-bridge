@@ -2,6 +2,7 @@
  * The server's own commands. Every external effect goes through {@link Runtime}.
  */
 import { type Api, ApiError, createApi } from "./api.ts";
+import { ensureBotKey } from "./botkey.ts";
 import { fillPost, postsMissingText } from "./db.ts";
 import { runPoller } from "./poller.ts";
 import { allowedAuthors, baseUrl, botUser, type Runtime } from "./runtime.ts";
@@ -18,14 +19,13 @@ Usage:
   ${NAME} backfill    Fetch the text of agent posts recorded before replies kept it
 
 Config (environment):
-  BRIDGE_DB              sqlite file (default: ~/.local/share/dev-null-bridge/bridge.db)
+  BRIDGE_DB              sqlite file (default: ~/.local/share/dev-null-bridge/bridge.db); the
+                         bot's SSH key is made on first start next to it, in bot/.ssh/
   BRIDGE_AUTHORS         comma-separated usernames whose replies count and who may use the web UI
                          (default: dtinth)
   BRIDGE_BOT_USER        the account agents post as (default: dtinth-bot)
   BRIDGE_INTERVAL        seconds between polls (default: 20)
   BRIDGE_COMMIT_SCRIPT   use this commit script instead of downloading one
-  BRIDGE_SSH_PRIVATE_KEY the bot's SSH key, written to ~/.ssh at start with its public half
-                         (or put both there yourself)
   BRIDGE_PUBLIC_URL      where the server is reached (default: http://localhost:<port>)
   BRIDGE_SESSION_SECRET  signs web sessions (32+ characters; required with GitHub login)
   GITHUB_CLIENT_ID       a GitHub OAuth app, for the web UI's login
@@ -94,10 +94,17 @@ async function serve(rt: Runtime): Promise<number> {
   }
   const hostname = rt.env["BRIDGE_HOSTNAME"] ?? "0.0.0.0";
   const config = serverConfig(rt.env, port);
-  await installSshKey(rt);
+  const publicKey = await ensureBotKey(rt, config.botUser);
+  if (rt.env["BRIDGE_SSH_PRIVATE_KEY"] !== undefined) {
+    rt.stderr(
+      "BRIDGE_SSH_PRIVATE_KEY is no longer read: the server signs with its own key (see Bot key in " +
+        "the web UI). To keep an old key, put it at bot/.ssh/id_ed25519 next to the database.\n",
+    );
+  }
   const db = rt.openDb();
 
   rt.stderr(`serving on http://${hostname}:${port} as ${config.publicUrl}\n`);
+  rt.stderr(`posting as @${config.botUser} with ${publicKey}\n`);
   if (config.oauth === null) rt.stderr("no GitHub OAuth app set: the web UI is closed\n");
   await Promise.all([
     runPoller(rt, db, createApi(rt.fetch, config.devnullUrl), {
@@ -107,26 +114,6 @@ async function serve(rt: Runtime): Promise<number> {
     rt.serve(port, hostname, createServer(rt, db, config)),
   ]);
   return 0;
-}
-
-/**
- * The commit script signs with a key from ~/.ssh. On a host where files are awkward to mount, the
- * key can come in the environment instead; it is written there (only the owner can read it), and
- * its public half, which the script also reads, is derived from it.
- */
-async function installSshKey(rt: Runtime): Promise<void> {
-  const privateKey = rt.env["BRIDGE_SSH_PRIVATE_KEY"] ?? "";
-  if (privateKey === "") return;
-  const path = `${rt.env["HOME"] ?? ""}/.ssh/devnull-bridge`;
-  await rt.writeTextFile(path, `${privateKey.replaceAll("\\n", "\n").trim()}\n`);
-  const derived = await rt.runCommand("ssh-keygen", ["-y", "-f", path]);
-  if (derived.code !== 0) {
-    throw new UsageError(
-      `BRIDGE_SSH_PRIVATE_KEY is not a usable SSH key (ssh-keygen: ${derived.stderr.trim()}).`,
-    );
-  }
-  await rt.writeTextFile(`${path}.pub`, `${derived.stdout.trim()}\n`);
-  rt.stderr(`installed the SSH key from the environment at ${path}\n`);
 }
 
 /** Posts recorded before `reply` kept their text get it from the public API, by full id. */

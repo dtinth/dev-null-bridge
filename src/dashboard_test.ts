@@ -8,7 +8,7 @@ import {
   threadPath,
 } from "./dashboard.ts";
 import { addTree, type Db, ingest, openDbAt, recordPost, saveRoot, setMeta } from "./db.ts";
-import { fakeRuntime } from "./fake_runtime.ts";
+import { FAKE_PUBLIC_KEY, type FakeOptions, fakeRuntime } from "./fake_runtime.ts";
 import { createServer } from "./server.ts";
 import { message, uuid } from "./test_util.ts";
 
@@ -42,8 +42,9 @@ function populated() {
 const SECRET = "a session secret that is long enough";
 
 /** The server's web UI over a database, as the signed-in dtinth sees it. */
-async function signedIn(db: Db) {
-  const rt = fakeRuntime();
+async function signedIn(db: Db, options: FakeOptions = {}, files: Record<string, string> = {}) {
+  const rt = fakeRuntime(options);
+  for (const [path, content] of Object.entries(files)) rt.files.set(path, content);
   rt.clock.time = NOW.getTime();
   rt.openDb = () => db;
   const handler = createServer(rt, db, {
@@ -194,4 +195,30 @@ Deno.test("the subscriptions page links each thread to its page, which the serve
 
   assertEquals((await get(threadPath("beta", R))).status, 404);
   assertEquals((await get("/threads/alpha")).status, 404);
+});
+
+Deno.test("the Bot key page shows the public key and whether the bot's GitHub lists it", async () => {
+  const KEYS = "https://github.com/dtinth-bot.keys";
+  const key = {
+    "/data/bot/.ssh/id_ed25519.pub": `${FAKE_PUBLIC_KEY} dtinth-bot@dev-null-bridge\n`,
+  };
+
+  const missing = await (await (await signedIn(populated(), {
+    texts: { [KEYS]: "ssh-ed25519 AAAAother\n" },
+  }, key))("/bot-key")).text();
+  assertStringIncludes(missing, `${FAKE_PUBLIC_KEY} dtinth-bot@dev-null-bridge`);
+  assertStringIncludes(missing, "Not on");
+  assertStringIncludes(missing, "https://github.com/settings/ssh/new");
+  assertStringIncludes(missing, '<a href="/bot-key">Bot key</a>');
+
+  const listed = await (await (await signedIn(populated(), {
+    texts: { [KEYS]: `ssh-ed25519 AAAAother\n${FAKE_PUBLIC_KEY}\n` },
+  }, key))("/bot-key")).text();
+  assertStringIncludes(listed, "Listed on");
+
+  const unknown = await (await (await signedIn(populated(), {}, key))("/bot-key")).text();
+  assertStringIncludes(unknown, "Could not ask GitHub");
+
+  const none = await (await (await signedIn(populated()))("/bot-key")).text();
+  assertStringIncludes(none, "No key yet");
 });

@@ -1,4 +1,4 @@
-/** The web UI's own pages: tokens, approving a login, and short messages. */
+/** The web UI's own pages: tokens, the bot's key, approving a login, and short messages. */
 import { escapeHtml, page } from "./dashboard.ts";
 import type { TokenInfo } from "./db.ts";
 
@@ -25,6 +25,40 @@ export function renderTokens(tokens: TokenInfo[], login: string): string {
       rows === ""
         ? '\n    <p class="empty">No machines yet. Run <code>devnull-bridge login &lt;this server&gt;</code> on one.</p>'
         : `\n    <ul class="tokens">${rows}\n    </ul>`
+    }
+  </section>`,
+    { login },
+  );
+}
+
+export function renderBotKey(
+  bot: string,
+  publicKey: string | null,
+  onGitHub: boolean | null,
+  login: string,
+): string {
+  const keys = `https://github.com/${encodeURIComponent(bot)}.keys`;
+  const check = onGitHub === true
+    ? `<p class="status ok">Listed on <a href="${keys}">${escapeHtml(keys)}</a>.</p>`
+    : onGitHub === false
+    ? `<p class="status warn">Not on <a href="${keys}">${
+      escapeHtml(keys)
+    }</a> yet, so posting fails. Log in to GitHub as @${
+      escapeHtml(bot)
+    }, open <a href="https://github.com/settings/ssh/new">New SSH key</a>, choose <em>Authentication key</em>, and paste it.</p>`
+    : `<p class="status">Could not ask GitHub whether <a href="${keys}">${
+      escapeHtml(keys)
+    }</a> has it.</p>`;
+  return page(
+    "Bot key · dev-null-bridge",
+    `  <h1>Bot key</h1>
+  <p class="status">The server signs @${
+      escapeHtml(bot)
+    }'s posts with a key it made itself; the private half never leaves it. dev-null.sh accepts a post when the public half is on the bot's GitHub.</p>
+  <section class="card">${
+      publicKey === null
+        ? '\n    <p class="empty">No key yet: the server makes one when it starts.</p>'
+        : `\n    <pre class="key">${escapeHtml(publicKey)}</pre>\n    ${check}`
     }
   </section>`,
     { login },

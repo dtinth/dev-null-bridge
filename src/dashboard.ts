@@ -164,7 +164,8 @@ const STYLE =
   .entry .body { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 0; }
   .entry .note { color: var(--muted); font-size: 13px; margin: 4px 0 0; }
   .entry .images a { font-size: 13px; margin-right: 10px; }
-  nav { display: flex; gap: 14px; align-items: baseline; margin: 0 0 18px; font-size: 14px; }
+  nav { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; margin: 0 0 18px; font-size: 14px; }
+  nav a, nav button { white-space: nowrap; }
   nav .who { margin-left: auto; color: var(--muted); }
   nav form { display: inline; }
   button { font: inherit; padding: 4px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; }
@@ -172,6 +173,10 @@ const STYLE =
   .token-meta { color: var(--muted); font-size: 13px; font-weight: 400; }
   .tokens li:first-child { border-top: 0; padding-top: 0; }
   .code { font: 600 24px ui-monospace, monospace; letter-spacing: .08em; margin: 8px 0 12px; }
+  .key { font: 13px ui-monospace, monospace; white-space: pre-wrap; word-break: break-all; margin: 0 0 12px; user-select: all; }
+  .card .status { margin: 0; }
+  .status.warn { color: var(--bad); }
+  .status.ok { color: var(--ok); }
 `;
 
 /**
@@ -295,6 +300,7 @@ export function page(
   const nav = options.login === undefined ? "" : `  <nav>
     <a href="/">Subscriptions</a>
     <a href="/tokens">Tokens</a>
+    <a href="/bot-key">Bot key</a>
     <span class="who">@${escapeHtml(options.login)}</span>
     <form method="post" action="/auth/logout"><button>Log out</button></form>
   </nav>
