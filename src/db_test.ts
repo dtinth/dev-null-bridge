@@ -1,16 +1,22 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import { DatabaseSync } from "node:sqlite";
 import {
   addTree,
+  approveLogin,
+  exportData,
   findIdsByShortHash,
   getMeta,
+  importData,
   ingest,
   listThreads,
+  listTokens,
+  NotADatabase,
   openDbAt,
   readMessages,
   recordPost,
   removeTree,
   setMeta,
+  startLogin,
 } from "./db.ts";
 import { message, uuid } from "./test_util.ts";
 
@@ -183,5 +189,77 @@ Deno.test("a database made before posts kept their text gains the columns", () =
         // SQLite removes them itself when the last connection closes.
       }
     }
+  }
+});
+
+Deno.test("export carries everything but tokens; import replaces it and keeps this server's tokens", () => {
+  const NOW = new Date("2026-10-19T12:00:00Z");
+  const old = openDbAt(":memory:");
+  ingest(old, [message(R, null), message(B1, R)]);
+  addTree(old, "alpha", R);
+  recordPost(old, { id: D1, parentId: B1, subscriber: "alpha", createdAt: "t", body: "On it" });
+  setMeta(old, "poller_heartbeat", "then");
+  startLogin(old, { code: "OLDC-ODEX", tokenHash: "old-hash", label: "old", now: NOW });
+  approveLogin(old, "OLDC-ODEX", "dtinth", NOW);
+
+  const file = exportData(old);
+  const server = openDbAt(":memory:");
+  startLogin(server, { code: "NEWC-ODEX", tokenHash: "new-hash", label: "box", now: NOW });
+  approveLogin(server, "NEWC-ODEX", "dtinth", NOW);
+  ingest(server, [message(B2, null)]);
+
+  assertEquals(importData(server, file), {
+    messages: 2,
+    posts: 1,
+    subscriptions: 3,
+    roots: 0,
+    meta: 1,
+  });
+  assertEquals(readMessages(server, "alpha").map((m) => m.id), [R, B1]);
+  assertEquals(findIdsByShortHash(server, B2.replaceAll("-", "").slice(-7)), []);
+  assertEquals(getMeta(server, "poller_heartbeat"), "then");
+  assertEquals(listTokens(server).map((t) => t.label), ["box"]);
+  assertEquals(listTokens(openDbAt(":memory:")).length, 0);
+});
+
+Deno.test("import takes an older bridge's WAL-mode file and refuses what is not a bridge database", () => {
+  const dir = Deno.makeTempDirSync();
+  try {
+    const path = `${dir}/bridge.db`;
+    const old = new DatabaseSync(path);
+    old.exec("PRAGMA journal_mode = WAL");
+    old.exec(
+      "CREATE TABLE posts (id TEXT PRIMARY KEY, parent_id TEXT NOT NULL, subscriber TEXT NOT NULL, created_at TEXT NOT NULL)",
+    );
+    old.exec("CREATE TABLE subscriptions (subscriber TEXT NOT NULL, commit_id TEXT NOT NULL)");
+    old.exec(
+      "CREATE TABLE messages (id TEXT PRIMARY KEY, short_hash TEXT NOT NULL, parent_id TEXT, author TEXT NOT NULL, body TEXT NOT NULL, images TEXT NOT NULL, html_url TEXT NOT NULL, created_at TEXT NOT NULL)",
+    );
+    old.exec("INSERT INTO posts VALUES ('p', 'r', 'x', 't')");
+    old.exec("INSERT INTO subscriptions VALUES ('x', 'r')");
+    old.close();
+    const bytes = Deno.readFileSync(path);
+    assertEquals(bytes[18], 2);
+
+    const server = openDbAt(":memory:");
+    assertEquals(importData(server, bytes).posts, 1);
+    assertEquals(server.prepare("SELECT body FROM posts").get()?.["body"], null);
+
+    const other = new DatabaseSync(`${dir}/other.db`);
+    other.exec("CREATE TABLE t (x)");
+    other.close();
+    assertThrows(
+      () => importData(server, Deno.readFileSync(`${dir}/other.db`)),
+      NotADatabase,
+      "not a dev-null-bridge database",
+    );
+    assertThrows(() => importData(server, new TextEncoder().encode("hello")), NotADatabase);
+    assertThrows(
+      () => importData(server, new TextEncoder().encode("SQLite format 3\0" + "x".repeat(100))),
+      NotADatabase,
+    );
+    assertEquals(server.prepare("SELECT count(*) AS n FROM posts").get()?.["n"], 1);
+  } finally {
+    Deno.removeSync(dir, { recursive: true });
   }
 });

@@ -78,6 +78,18 @@ Deno.test("a key put there without its .pub gets one derived, and the old env ke
   assertStringIncludes(unreadable.err.join(""), "invalid format");
 });
 
+Deno.test("export writes the data to a file, for the Data page to import", async () => {
+  const rt = fakeRuntime();
+  recordPost(rt.openDb(), { id: uuid(2), parentId: ROOT, subscriber: "x", createdAt: "t" });
+
+  assertEquals(await runCli(["export", "bridge.db"], rt), 0);
+
+  const file = rt.binaries.get("bridge.db")!;
+  assertEquals(new TextDecoder().decode(file.subarray(0, 15)), "SQLite format 3");
+  assertStringIncludes(rt.out.join(""), "wrote bridge.db: 0 messages, 1 subscriptions");
+  assertEquals(await runCli(["export"], rt), 2);
+});
+
 Deno.test("the server's config needs both halves of the OAuth app and a long session secret", () => {
   assertEquals(serverConfig({}, 8787).publicUrl, "http://localhost:8787");
   assertEquals(serverConfig({}, 8787).oauth, null);

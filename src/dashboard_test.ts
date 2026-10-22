@@ -60,8 +60,13 @@ async function signedIn(db: Db, options: FakeOptions = {}, files: Record<string,
     new Date(NOW.getTime() + 60_000),
     SECRET,
   )}`;
-  return (path: string) =>
-    handler(new Request(`https://bridge.example${path}`, { headers: { cookie } }));
+  return (path: string, init: RequestInit = {}) =>
+    handler(
+      new Request(`https://bridge.example${path}`, {
+        ...init,
+        headers: { cookie, ...init.headers as Record<string, string> },
+      }),
+    );
 }
 
 Deno.test("each subscriber lists how many commit ids it follows and its threads", () => {
@@ -221,4 +226,39 @@ Deno.test("the Bot key page shows the public key and whether the bot's GitHub li
 
   const none = await (await (await signedIn(populated()))("/bot-key")).text();
   assertStringIncludes(none, "No key yet");
+});
+
+Deno.test("the Data page exports the database and imports one in its place", async () => {
+  const get = await signedIn(populated());
+  assertStringIncludes(await (await get("/data")).text(), 'action="/data/import"');
+
+  const exported = await get("/data/export");
+  assertEquals(
+    exported.headers.get("content-disposition"),
+    'attachment; filename="bridge-2026-10-19.db"',
+  );
+  const file = new Uint8Array(await exported.arrayBuffer());
+  assertEquals(new TextDecoder().decode(file.subarray(0, 15)), "SQLite format 3");
+
+  const empty = openDbAt(":memory:");
+  const into = await signedIn(empty);
+  const form = new FormData();
+  form.append("file", new File([file], "bridge.db"));
+  const imported = await into("/data/import", { method: "POST", body: form });
+  assertEquals(imported.status, 200);
+  assertStringIncludes(await imported.text(), "subscriptions</span><span>4</span>");
+  assertEquals(collectDashboard(empty, NOW).subscribers.map((s) => s.name), ["alpha", "beta"]);
+
+  const junk = new FormData();
+  junk.append("file", new File(["hello"], "notes.txt"));
+  const refused = await into("/data/import", { method: "POST", body: junk });
+  assertEquals(refused.status, 400);
+  assertStringIncludes(await refused.text(), "not a sqlite file");
+
+  const cross = await into("/data/import", {
+    method: "POST",
+    body: form,
+    headers: { origin: "https://evil.example" },
+  });
+  assertEquals(cross.status, 403);
 });

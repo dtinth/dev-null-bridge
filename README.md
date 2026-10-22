@@ -100,6 +100,8 @@ Without Docker: `bin/devnull-bridge-server serve` with Deno 2.x, `curl` and `ssh
 
 - **Subscriptions** (`/`): every subscriber, the threads it follows, and a page per thread.
 - **Bot key** (`/bot-key`): the public key to add to the bot's GitHub, and whether it is there.
+- **Data** (`/data`): export the threads, subscriptions and messages as a sqlite file, or import
+  one in their place (tokens are never in it).
 - **Tokens** (`/tokens`): each logged-in machine with its label and when it was last used; revoke
   one to lock it out at once.
 - **Approve** (`/approve?code=…`): where `devnull-bridge login` sends you.
@@ -110,13 +112,16 @@ you did not start gives them a token that posts as the bot.
 
 ### Moving from a single-machine bridge
 
-The server reads the same sqlite file, so threads, subscriptions and cursors carry over. Stop the
-old poller, copy the file safely, and put it on the server's volume as `bridge.db`:
+Threads, subscriptions and messages carry over. On the old machine, stop its poller and export
+them with this checkout (it reads the same `~/.local/share/dev-null-bridge/bridge.db`):
 
 ```sh
 pitchfork stop dev-null-bridge
-sqlite3 ~/.local/share/dev-null-bridge/bridge.db ".backup bridge.db"
+bin/devnull-bridge-server export bridge.db
 ```
+
+Then import that file under **Data** in the server's web UI. It replaces the server's threads and
+messages; tokens and the bot key stay.
 
 The old bridge signed with a key in `~/.ssh`. Either add the server's new key to the bot's GitHub
 (Bot key), or keep the old one: copy it (the private key is enough) to `bot/.ssh/id_ed25519` on the
@@ -165,8 +170,8 @@ devnull-bridge reply my-session <hash> < body.txt                        # body 
 | `list [name]` | The threads each subscriber follows |
 | `status` | Who the bridge listens to and posts as, the server, and whether its poller is running |
 
-The server has two commands of its own: `serve`, and `backfill` (fetch the text of agent posts
-recorded before `reply` kept it).
+The server has commands of its own: `serve`, `backfill` (fetch the text of agent posts recorded
+before `reply` kept it), and `export <file>` (the same file as the Data page's export).
 
 ## Limits
 

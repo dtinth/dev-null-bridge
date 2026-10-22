@@ -3,7 +3,7 @@
  */
 import { type Api, ApiError, createApi } from "./api.ts";
 import { ensureBotKey } from "./botkey.ts";
-import { fillPost, postsMissingText } from "./db.ts";
+import { exportData, fillPost, postsMissingText } from "./db.ts";
 import { runPoller } from "./poller.ts";
 import { allowedAuthors, baseUrl, botUser, type Runtime } from "./runtime.ts";
 import { createServer, type ServerConfig } from "./server.ts";
@@ -17,6 +17,9 @@ sqlite file, posts as the bot, and serves the CLI's API and the web UI
 Usage:
   ${NAME} serve       Run the poller and the HTTP server
   ${NAME} backfill    Fetch the text of agent posts recorded before replies kept it
+  ${NAME} export <file>
+                      Write the threads, subscriptions and messages to a sqlite file, for the
+                      web UI's Data page to import (tokens are left out)
 
 Config (environment):
   BRIDGE_DB              sqlite file (default: ~/.local/share/dev-null-bridge/bridge.db); the
@@ -41,6 +44,10 @@ export async function runCli(argv: string[], rt: Runtime): Promise<number> {
   const [command, ...args] = argv;
 
   try {
+    if (command === "export") {
+      if (args.length !== 1) throw new UsageError(`Usage: ${NAME} export <file>`);
+      return await exportTo(rt, args[0]!);
+    }
     if (args.length > 0) throw new UsageError(`${command} takes no arguments.`);
     switch (command) {
       case undefined:
@@ -113,6 +120,22 @@ async function serve(rt: Runtime): Promise<number> {
     }),
     rt.serve(port, hostname, createServer(rt, db, config)),
   ]);
+  return 0;
+}
+
+/** The same file as the web UI's export, e.g. to move a single-machine bridge onto a server. */
+async function exportTo(rt: Runtime, path: string): Promise<number> {
+  const db = rt.openDb();
+  const counts = Object.fromEntries(
+    ["messages", "subscriptions"].map((table) => [
+      table,
+      Number(db.prepare(`SELECT count(*) AS n FROM ${table}`).get()?.["n"]),
+    ]),
+  );
+  await rt.writeFile(path, exportData(db));
+  rt.stdout(
+    `wrote ${path}: ${counts["messages"]} messages, ${counts["subscriptions"]} subscriptions\n`,
+  );
   return 0;
 }
 

@@ -449,3 +449,78 @@ export function listTokens(db: Db): TokenInfo[] {
 export function deleteToken(db: Db, id: string): boolean {
   return Number(db.prepare("DELETE FROM tokens WHERE id = ?").run(id).changes) > 0;
 }
+
+/** What export and import carry: everything but who may log in. */
+const DATA_TABLES = ["messages", "posts", "subscriptions", "roots", "meta"] as const;
+
+/** Thrown when an uploaded file is not a bridge database. */
+export class NotADatabase extends Error {}
+
+/** Loads a database file into memory. A WAL file's header is marked rollback: memory has no WAL. */
+function loadCopy(bytes: Uint8Array): Db {
+  const header = new TextDecoder().decode(bytes.subarray(0, 16));
+  if (header !== "SQLite format 3\0") throw new NotADatabase("That is not a sqlite file.");
+  const copy = new Uint8Array(bytes);
+  if (copy[18] === 2) copy[18] = 1;
+  if (copy[19] === 2) copy[19] = 1;
+  const db = new DatabaseSync(":memory:");
+  try {
+    db.deserialize(copy);
+    // Its views and triggers come from the upload: never run functions from them.
+    db.exec("PRAGMA trusted_schema = OFF");
+    db.prepare("SELECT count(*) FROM sqlite_master").get();
+  } catch (error) {
+    throw new NotADatabase(`That sqlite file cannot be read: ${(error as Error).message}`);
+  }
+  return db;
+}
+
+/** The threads, subscriptions and messages as a sqlite file, without tokens or pending logins. */
+export function exportData(db: Db): Uint8Array<ArrayBuffer> {
+  const copy = new DatabaseSync(":memory:");
+  copy.exec(SCHEMA);
+  inTransaction(copy, () => copyData(db, copy));
+  const bytes = new Uint8Array(copy.serialize());
+  copy.close();
+  return bytes;
+}
+
+/** Replaces the data tables of `to` with those of `from`; the rows read per table. */
+function copyData(from: Db, to: Db): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const table of DATA_TABLES) {
+    const columns = to.prepare(`PRAGMA table_info(${table})`).all().map((row) =>
+      `"${String(row["name"])}"`
+    );
+    const rows = from.prepare(`SELECT ${columns.join(", ")} FROM ${table}`).all();
+    to.exec(`DELETE FROM ${table}`);
+    const insert = to.prepare(
+      `INSERT INTO ${table} (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`,
+    );
+    for (const row of rows) insert.run(...Object.values(row) as (string | number | null)[]);
+    counts[table] = rows.length;
+  }
+  return counts;
+}
+
+/**
+ * Replaces the threads, subscriptions and messages with those in a sqlite file (an export, or the
+ * bridge.db of a single-machine bridge). Tokens stay. Returns the rows read per table.
+ */
+export function importData(db: Db, bytes: Uint8Array): Record<string, number> {
+  const source = loadCopy(bytes);
+  const tables = new Set(
+    source.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all()
+      .map((row) => String(row["name"])),
+  );
+  if (!tables.has("messages") || !tables.has("subscriptions")) {
+    throw new NotADatabase("That sqlite file is not a dev-null-bridge database.");
+  }
+  // An older bridge's file: bring it up to this schema first.
+  source.exec(SCHEMA);
+  addMissingColumns(source, "posts", ["body TEXT", "html_url TEXT"]);
+
+  const counts = inTransaction(db, () => copyData(source, db));
+  source.close();
+  return counts;
+}

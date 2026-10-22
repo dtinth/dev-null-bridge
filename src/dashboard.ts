@@ -301,6 +301,7 @@ export function page(
     <a href="/">Subscriptions</a>
     <a href="/tokens">Tokens</a>
     <a href="/bot-key">Bot key</a>
+    <a href="/data">Data</a>
     <span class="who">@${escapeHtml(options.login)}</span>
     <form method="post" action="/auth/logout"><button>Log out</button></form>
   </nav>

@@ -30,10 +30,13 @@ import {
   countPendingLogins,
   type Db,
   deleteToken,
+  exportData,
   findLogin,
   getMeta,
+  importData,
   listThreads,
   listTokens,
+  NotADatabase,
   readMessages,
   recordPost,
   removeTree,
@@ -47,7 +50,15 @@ import { postCommit } from "./post.ts";
 import { resolveRef } from "./refs.ts";
 import type { Runtime } from "./runtime.ts";
 import { messageJson } from "./types.ts";
-import { renderApprove, renderApproved, renderBotKey, renderMessage, renderTokens } from "./web.ts";
+import {
+  renderApprove,
+  renderApproved,
+  renderBotKey,
+  renderData,
+  renderImported,
+  renderMessage,
+  renderTokens,
+} from "./web.ts";
 
 export interface ServerConfig {
   /** Whose replies count, and who may use the web UI. */
@@ -115,6 +126,9 @@ function field(value: unknown, name: string): string {
 const MAX_JSON_BYTES = 16 * 1024;
 /** Three images and their text, with room for the multipart framing. */
 const MAX_REPLY_BYTES = MAX_IMAGES * MAX_IMAGE_BYTES + 1024 * 1024;
+/** The largest database file an import takes. */
+const MAX_IMPORT_BYTES = 64 * 1024 * 1024;
+const DATA_LINK = { href: "/data", text: "Back to Data" };
 /** Login requests waiting for approval at once; more is someone filling the database. */
 const MAX_PENDING_LOGINS = 50;
 
@@ -441,6 +455,40 @@ export function createServer(
       const publicKey = await readBotKey(rt);
       const onGitHub = publicKey === null ? null : await keyOnGitHub(rt, config.botUser, publicKey);
       return html(renderBotKey(config.botUser, publicKey, onGitHub, login));
+    }
+
+    if (url.pathname === "/data" && request.method === "GET") {
+      return html(renderData(login));
+    }
+    if (url.pathname === "/data/export" && request.method === "GET") {
+      const date = rt.now().toISOString().slice(0, 10);
+      return new Response(exportData(db), {
+        headers: {
+          "content-type": "application/vnd.sqlite3",
+          "content-disposition": `attachment; filename="bridge-${date}.db"`,
+          "cache-control": "no-store",
+        },
+      });
+    }
+    if (url.pathname === "/data/import" && request.method === "POST") {
+      let file: FormDataEntryValue | null;
+      try {
+        const body = await limitedBody(request, MAX_IMPORT_BYTES);
+        file = (await new Response(body, { headers: request.headers }).formData()).get("file");
+      } catch (error) {
+        if (error instanceof HttpError) throw error;
+        file = null;
+      }
+      if (!(file instanceof File) || file.size === 0) {
+        return html(renderMessage("No file", "Choose a .db file to import.", DATA_LINK), 400);
+      }
+      try {
+        const counts = importData(db, new Uint8Array(await file.arrayBuffer()));
+        return html(renderImported(counts, login));
+      } catch (error) {
+        if (!(error instanceof NotADatabase)) throw error;
+        return html(renderMessage("Not imported", error.message, DATA_LINK), 400);
+      }
     }
 
     if (url.pathname === "/approve") {
