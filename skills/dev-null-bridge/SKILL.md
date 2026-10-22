@@ -40,9 +40,16 @@ reach you, and `posting as:` the bot account you post as. Below, "your human" me
    so the answer to it reaches you:
 
    ```sh
-   devnull-bridge reply <name> <commit> "text"
-   devnull-bridge reply <name> <commit> --image shot.png "text"   # up to 3 JPEG/PNG/WebP, 10 MB each
+   devnull-bridge reply <name> <commit> <<'EOF'
+   Done: it's pushed, and `deno task ci` passes.
+   EOF
+   devnull-bridge reply <name> <commit> --image shot.png <<'EOF'   # up to 3 JPEG/PNG/WebP, 10 MB each
+   Here's the screenshot.
+   EOF
    ```
+
+   With no text arguments the body is read from stdin. Use a quoted heredoc (`<<'EOF'`) so
+   quotes, backticks and `$` reach the post as written. Short text as arguments works too.
 
    `<commit>` is a URL, a full id, or the 7-character hash. Reply to the message you are answering,
    so the thread reads right.

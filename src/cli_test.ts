@@ -1,7 +1,7 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { runCli } from "./cli.ts";
 import { ingest, readTree, recordPost } from "./db.ts";
-import { commitJson, fakeRuntime } from "./fake_runtime.ts";
+import { commitJson, type FakeOptions, fakeRuntime } from "./fake_runtime.ts";
 import { message, uuid } from "./test_util.ts";
 
 const API = "https://dev-null.sh/api/v1/commits";
@@ -17,8 +17,9 @@ function jsonLines(rt: { out: string[] }): Record<string, unknown>[] {
 
 const COMMIT_SCRIPT = "#!/usr/bin/env bash\nssh-keygen -Y sign\n";
 
-function rtWithRoot() {
+function rtWithRoot(options: FakeOptions = {}) {
   return fakeRuntime({
+    ...options,
     routes: { [`${API}/${ROOT}`]: { data: commitJson(ROOT, null, { body: "Please build X" }) } },
     texts: { "https://dev-null.sh/commit": COMMIT_SCRIPT },
     command: (_cmd, args) => ({
@@ -150,6 +151,25 @@ Deno.test("reply posts through the commit script, follows the new commit and get
   rt.out.length = 0;
   await runCli(["read", "x"], rt);
   assertEquals(jsonLines(rt).map((m) => m["body"]), ["thanks"]);
+});
+
+Deno.test("reply reads the body from stdin when no text is given", async () => {
+  const body = 'It\'s "quoted" and costs $5,\nover `two` lines\n';
+  const rt = rtWithRoot({ stdin: body });
+
+  assertEquals(await runCli(["reply", "x", ROOT], rt), 0);
+  assertEquals(rt.commands.at(-1)!.args.at(-1), 'It\'s "quoted" and costs $5,\nover `two` lines');
+
+  // Text arguments win over stdin.
+  assertEquals(await runCli(["reply", "x", ROOT, "from", "args"], rt), 0);
+  assertEquals(rt.commands.at(-1)!.args.at(-1), "from args");
+});
+
+Deno.test("reply with no text anywhere is a usage error", async () => {
+  assertEquals(await runCli(["reply", "x", ROOT], rtWithRoot()), 2);
+  const blank = fakeRuntime({ stdin: "\n\n" });
+  assertEquals(await runCli(["reply", "x", ROOT], blank), 2);
+  assertEquals(blank.commands, []);
 });
 
 Deno.test("the commit script is downloaded once and only if it looks like the script", async () => {

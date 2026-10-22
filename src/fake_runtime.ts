@@ -19,6 +19,8 @@ export interface FakeOptions {
   /** Text bodies by URL. */
   texts?: Record<string, string>;
   command?: (cmd: string, args: string[]) => CommandResult;
+  /** What is piped into the process; omitted, stdin is a terminal. */
+  stdin?: string;
 }
 
 export function fakeRuntime(options: FakeOptions = {}): FakeRuntime {
@@ -66,6 +68,7 @@ export function fakeRuntime(options: FakeOptions = {}): FakeRuntime {
       return Promise.resolve();
     },
     cacheDir: () => "/cache",
+    readStdin: () => Promise.resolve(options.stdin ?? null),
     readTextFile: (path) => Promise.resolve(files.get(path) ?? null),
     writeTextFile: (path, content) => {
       files.set(path, content);

@@ -23,6 +23,8 @@ export interface Runtime {
   cacheDir(): string;
   /** Serve HTTP on 127.0.0.1 until the process is stopped. */
   serve(port: number, handler: (request: Request) => Response | Promise<Response>): Promise<void>;
+  /** Everything piped into the process, or null when stdin is a terminal. */
+  readStdin(): Promise<string | null>;
   readTextFile(path: string): Promise<string | null>;
   writeTextFile(path: string, content: string): Promise<void>;
 }

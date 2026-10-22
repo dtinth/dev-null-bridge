@@ -38,8 +38,9 @@ Usage:
   ${CLI_NAME} long-poll <name> --after id [--interval secs] [--timeout secs]
                                              Block until a message newer than id arrives, print it
                                              and the command to run next, then exit
-  ${CLI_NAME} reply <name> <commit> [--image path]... <text>
-                                             Post a reply as the bot and follow it as <name>
+  ${CLI_NAME} reply <name> <commit> [--image path]... [text]
+                                             Post a reply as the bot and follow it as <name>;
+                                             with no text, the body is read from stdin
   ${CLI_NAME} list [name]                    The threads each subscriber follows
   ${CLI_NAME} status                         Who the bridge listens to and posts as, and whether
                                              the poller is running
@@ -273,15 +274,20 @@ async function longPoll(rt: Runtime, args: string[]): Promise<number> {
   return 0;
 }
 
+const REPLY_USAGE = `usage: ${CLI_NAME} reply <name> <commit> [--image path]... [text]
+  (with no text, the body is read from stdin)`;
+
 async function reply(rt: Runtime, args: string[]): Promise<number> {
   const parsed = parseArgs(args, ["image"]);
   const name = subscriberName(parsed.positionals[0]);
   const ref = parsed.positionals[1];
-  const text = parsed.positionals.slice(2).join(" ");
   const images = parsed.flags.get("image") ?? [];
-  if (ref === undefined || (text === "" && images.length === 0)) {
-    throw new UsageError(`usage: ${CLI_NAME} reply <name> <commit> [--image path]... <text>`);
-  }
+  if (ref === undefined) throw new UsageError(REPLY_USAGE);
+  // With no text arguments the body comes from stdin, so it needs no shell quoting.
+  const text = parsed.positionals.length > 2
+    ? parsed.positionals.slice(2).join(" ")
+    : (await rt.readStdin() ?? "").replace(/\n+$/, "");
+  if (text.trim() === "" && images.length === 0) throw new UsageError(REPLY_USAGE);
 
   const db = rt.openDb();
   const parentId = await resolveRef(ref, {

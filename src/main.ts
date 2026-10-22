@@ -58,6 +58,10 @@ const runtime: Runtime = {
   serve: (port, handler) =>
     Deno.serve({ hostname: "127.0.0.1", port, onListen: () => {} }, handler).finished,
   cacheDir: () => `${env["XDG_CACHE_HOME"] ?? `${home}/.cache`}/dev-null-bridge`,
+  async readStdin() {
+    if (Deno.stdin.isTerminal()) return null;
+    return await new Response(Deno.stdin.readable).text();
+  },
   async readTextFile(path) {
     try {
       return await Deno.readTextFile(path);

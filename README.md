@@ -85,6 +85,7 @@ devnull-bridge watch my-session https://dev-null.sh/@you/commits/<id>   # or a 7
 devnull-bridge long-poll my-session --after <id>                         # in the background
 devnull-bridge reply my-session <hash> "Done, pushed."                   # posts and follows
 devnull-bridge reply my-session <hash> --image shot.png "Screenshot"
+devnull-bridge reply my-session <hash> < body.txt                        # body from stdin
 devnull-bridge dashboard                                                  # http://127.0.0.1:8787
 ```
 
@@ -97,7 +98,7 @@ devnull-bridge dashboard                                                  # http
 | `unwatch <name> <commit>` | Stop following it (and what is under it) |
 | `read <name> [--after id]` | Print what `<name>` has received, once |
 | `long-poll <name> --after id [--interval s] [--timeout s]` | Block for the next message |
-| `reply <name> <commit> [--image path]... <text>` | Post as the bot and follow the new commit |
+| `reply <name> <commit> [--image path]... [text]` | Post as the bot and follow the new commit; with no text, the body is read from stdin |
 | `list [name]` | The threads each subscriber follows |
 | `status` | Whether the poller is running |
 | `poller` | Run the poller |
